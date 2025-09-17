@@ -3,22 +3,24 @@ import { Button } from '@/components/ui/button';
 import { ShoppingCart, Check, AlertCircle } from 'lucide-react';
 import { Recipe } from '@/services/recipeService';
 import { picnicService } from '@/services/picnicService';
+import { backendService } from '@/services/backendService';
 import { useToast } from '@/hooks/use-toast';
 
 interface AddToBasketButtonProps {
   recipe: Recipe;
+  onFailed?: (failed: string[]) => void;
 }
 
-export function AddToBasketButton({ recipe }: AddToBasketButtonProps) {
+export function AddToBasketButton({ recipe, onFailed }: AddToBasketButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const { toast } = useToast();
 
   const handleAddToBasket = async () => {
-    if (!picnicService.isLoggedIn()) {
+    if (!backendService.isLoggedIn()) {
       toast({
         title: 'Niet ingelogd',
-        description: 'Log eerst in bij Picnic om ingrediënten toe te voegen',
+        description: 'Log eerst in bij de app en koppel je Picnic-account',
         variant: 'destructive',
       });
       return;
@@ -28,7 +30,8 @@ export function AddToBasketButton({ recipe }: AddToBasketButtonProps) {
     setIsSuccess(false);
 
     try {
-      const result = await picnicService.addIngredientsToBasket(recipe.ingredients);
+      // Route via backend so credentials blijven server-side
+      const result = await backendService.addIngredients(recipe.ingredients);
       
       if (result.success > 0) {
         setIsSuccess(true);
@@ -38,6 +41,7 @@ export function AddToBasketButton({ recipe }: AddToBasketButtonProps) {
         });
 
         if (result.failed.length > 0) {
+          onFailed?.(result.failed)
           toast({
             title: 'Enkele ingrediënten niet gevonden',
             description: `${result.failed.length} ingrediënten konden niet worden toegevoegd: ${result.failed.slice(0, 3).join(', ')}${result.failed.length > 3 ? '...' : ''}`,

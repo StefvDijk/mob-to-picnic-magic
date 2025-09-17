@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Recipe } from '@/services/recipeService';
+import { Recipe } from '@/types/recipe';
 import { ChefHat, Clock, Users } from 'lucide-react';
 
 interface RecipeCardProps {

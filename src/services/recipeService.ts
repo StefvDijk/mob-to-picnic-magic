@@ -1,14 +1,5 @@
 import { Ingredient } from './picnicService';
-
-export interface Recipe {
-  title: string;
-  description: string;
-  ingredients: Ingredient[];
-  instructions: string[];
-  servings?: number;
-  cookingTime?: string;
-  imageUrl?: string;
-}
+import { Recipe } from '@/types/recipe';
 
 class RecipeService {
   async fetchRecipe(url: string): Promise<Recipe> {
