@@ -1,73 +1,65 @@
-# Welcome to your Lovable project
+# Mob → Picnic Boodschappenmatcher
 
-## Project info
+Deze repository bevat de MobToPicnic webapplicatie en een lichte Node API-server. De app extraheert ingrediënten uit MOB-recepten, normaliseert ze en matcht ze automatisch met Picnic-producten. Matches boven de ingestelde drempel worden direct aan het winkelmandje toegevoegd; overige items verschijnen in een review-UI waar je de beste kandidaat kunt kiezen.
 
-**URL**: https://lovable.dev/projects/0106f53d-fe74-4657-8d53-1987e55451f0
+## Projectstructuur
 
-## How can I edit this code?
+- `src/` – React/Tailwind frontend met shadcn-ui componenten
+- `server/` – Lichtgewicht HTTP-server (zonder Express) met Picnic integratie, AI-normalisatie (OpenAI optioneel) en sessiebeheer
+- `SPECIFICATION.md` – Functionele en technische requirements
 
-There are several ways of editing your application.
+## Ontwikkelen
 
-**Use Lovable**
+1. Installeer dependencies (eenmalig):
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/0106f53d-fe74-4657-8d53-1987e55451f0) and start prompting.
+   ```sh
+   npm install
+   ```
 
-Changes made via Lovable will be committed automatically to this repo.
+   > **Let op:** in omgevingen zonder toegang tot npm kan deze stap falen. In dat geval kun je bestaande `node_modules` gebruiken of de installatie later uitvoeren.
 
-**Use your preferred IDE**
+2. Start de API-server (laadt .env indien aanwezig):
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+   ```sh
+   npm run server
+   ```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+3. Start in een tweede terminal het Vite frontend:
 
-Follow these steps:
+   ```sh
+   npm run dev
+   ```
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+4. Open de browser op de URL die Vite toont (standaard `http://localhost:5173`).
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## Configuratie
 
-# Step 3: Install the necessary dependencies.
-npm i
+Maak een `.env` bestand aan voor lokale development:
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+PICNIC_EMAIL=...
+PICNIC_PASSWORD=...
+OPENAI_API_KEY=... # Optioneel, heuristieken worden gebruikt als de key ontbreekt of het pakket niet geïnstalleerd is
+AUTO_ADD_THRESHOLD=0.72
+PORT=3000
 ```
 
-**Edit a file directly in GitHub**
+Wanneer er geen Picnic-inloggegevens beschikbaar zijn, draait de server automatisch in mock-modus met voorbeeldproducten. Zo kun je de volledige flow testen zonder echte API-calls.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Features
 
-**Use GitHub Codespaces**
+- Extractie van MOB-ingrediënten (bookmarklet/URL input)
+- Normalisatie via OpenAI (optioneel) of heuristiek
+- Picnic-zoekopdrachten met fallback naar mock data
+- Automatisch toevoegen bij hoge confidence en review-UI voor twijfelgevallen
+- Handmatige bevestiging stuurt feedback naar een in-memory mapping voor toekomstige matches
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Tech stack
 
-## What technologies are used for this project?
+- React + Vite + TypeScript
+- Tailwind CSS & shadcn-ui
+- Node HTTP-server met Picnic SDK en optionele OpenAI-integratie
 
-This project is built with:
+## Deployment
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/0106f53d-fe74-4657-8d53-1987e55451f0) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+De frontend kan via Lovable gedeployed worden. Voor productgebruik is een persistent backend (bijv. op Render, Railway, Fly.io) nodig die `npm run server` draait en bereikbaar is voor de frontend.

@@ -1,97 +1,168 @@
-import PicnicClient from 'picnic-api';
-
 export interface PicnicCredentials {
   username: string;
   password: string;
 }
 
 export interface Ingredient {
+  raw: string;
   name: string;
   quantity?: string;
   unit?: string;
 }
 
+export interface Candidate {
+  id: string;
+  name: string;
+  brand?: string | null;
+  isBio: boolean;
+  unitSize?: string | null;
+  priceEUR?: string | null;
+  matchScore?: number;
+}
+
+export interface IngredientDecision {
+  decision: 'pick' | 'none';
+  chosenProductId?: string;
+  confidence: number;
+  reason?: string;
+}
+
+export interface IngredientItem {
+  raw: string;
+  normalizedQuery: string;
+  attributes: {
+    category: string;
+    variant?: string | null;
+    brand?: string | null;
+    organic?: boolean;
+    notes?: string | null;
+  };
+  quantity: {
+    count: number;
+    unit?: string | null;
+    sizeHint?: string | null;
+  };
+  candidates: Candidate[];
+  decision: IngredientDecision;
+  added?: boolean;
+}
+
+export interface SessionSummary {
+  totalItems: number;
+  addedToCart: number;
+  autoAdded: number;
+  needsReview: number;
+  noMatch: number;
+}
+
+export interface MatchSessionResponse {
+  sessionId: string;
+  items: IngredientItem[];
+  summary: SessionSummary;
+  mode: 'mock' | 'live';
+}
+
+export interface ConfirmAddResponse {
+  addedCount: number;
+  failed: string[];
+  session: {
+    sessionId: string;
+    createdAt: string;
+    items: IngredientItem[];
+    summary: SessionSummary;
+  };
+}
+
+interface RequestOptions extends RequestInit {
+  parse?: boolean;
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+function buildUrl(path: string) {
+  if (API_BASE) {
+    return `${API_BASE.replace(/\/$/, '')}${path}`;
+  }
+  return path;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await fetch(buildUrl(path), {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  const shouldParse = options.parse !== false;
+  if (!shouldParse) {
+    return undefined as unknown as T;
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = payload?.message || 'Serverfout';
+    throw new Error(message);
+  }
+  return payload as T;
+}
+
 class PicnicService {
-  private client: InstanceType<typeof PicnicClient> | null = null;
-  private isAuthenticated = false;
+  private authenticated = false;
+  private mode: 'mock' | 'live' | null = null;
 
-  async login(credentials: PicnicCredentials): Promise<boolean> {
-    try {
-      this.client = new PicnicClient();
-      await this.client.login(credentials.username, credentials.password);
-      this.isAuthenticated = true;
-      return true;
-    } catch (error) {
-      console.error('Picnic login failed:', error);
-      this.isAuthenticated = false;
-      return false;
-    }
+  isLoggedIn() {
+    return this.authenticated;
   }
 
-  async searchProduct(query: string): Promise<any[]> {
-    if (!this.client || !this.isAuthenticated) {
-      throw new Error('Not authenticated with Picnic');
-    }
-
-    try {
-      const results = await this.client.search(query);
-      return results || [];
-    } catch (error) {
-      console.error('Product search failed:', error);
-      return [];
-    }
+  getMode() {
+    return this.mode;
   }
 
-  async addToBasket(productId: string, quantity: number = 1): Promise<boolean> {
-    if (!this.client || !this.isAuthenticated) {
-      throw new Error('Not authenticated with Picnic');
-    }
+  async login(credentials: PicnicCredentials) {
+    const data = await request<{ success: boolean; mode: 'mock' | 'live'; message: string }>(
+      '/api/login',
+      {
+        method: 'POST',
+        body: JSON.stringify(credentials),
+      },
+    );
 
-    try {
-      await this.client.addProductToShoppingCart(productId, quantity);
-      return true;
-    } catch (error) {
-      console.error('Failed to add product to basket:', error);
-      return false;
-    }
+    this.authenticated = data.success;
+    this.mode = data.mode;
+    return data;
   }
 
-  async addIngredientsToBasket(ingredients: Ingredient[]): Promise<{ success: number; failed: string[] }> {
-    const results = { success: 0, failed: [] as string[] };
-
-    for (const ingredient of ingredients) {
-      try {
-        const products = await this.searchProduct(ingredient.name);
-        if (products.length > 0) {
-          const product = products[0]; // Take the first (most relevant) result
-          const success = await this.addToBasket(String(product.id), 1);
-          if (success) {
-            results.success++;
-          } else {
-            results.failed.push(ingredient.name);
-          }
-        } else {
-          results.failed.push(ingredient.name);
-        }
-        
-        // Add a small delay to avoid overwhelming the API
-        await new Promise(resolve => setTimeout(resolve, 200));
-      } catch (error) {
-        console.error(`Failed to add ${ingredient.name}:`, error);
-        results.failed.push(ingredient.name);
-      }
-    }
-
-    return results;
+  async logout() {
+    await request('/api/logout', { method: 'POST', parse: false });
+    this.authenticated = false;
+    this.mode = null;
   }
 
-  isLoggedIn(): boolean {
-    return this.isAuthenticated;
+  async startMatchSession(rawItems: { raw: string }[], autoAddThreshold?: number) {
+    const payload = await request<MatchSessionResponse>('/api/match-session', {
+      method: 'POST',
+      body: JSON.stringify({ items: rawItems, autoAddThreshold }),
+    });
+
+    return payload;
   }
 
-  logout(): void {
-    this.client = null;
-    this.isAuthenticated = false;
+  async fetchSession(sessionId: string) {
+    return request<{
+      sessionId: string;
+      createdAt: string;
+      items: IngredientItem[];
+      summary: SessionSummary;
+    }>(`/api/session/${sessionId}`);
+  }
+
+  async confirmAdditions(sessionId: string, picks: { raw: string; productId: string; qty?: number }[]) {
+    return request<ConfirmAddResponse>(`/api/session/${sessionId}/confirm-add`, {
+      method: 'POST',
+      body: JSON.stringify({ picks }),
+    });
   }
 }
 

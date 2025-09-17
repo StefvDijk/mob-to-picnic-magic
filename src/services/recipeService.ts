@@ -155,6 +155,7 @@ class RecipeService {
     
     if (quantityMatch) {
       return {
+        raw: text,
         quantity: quantityMatch[1],
         unit: quantityMatch[2] || '',
         name: quantityMatch[3].trim()
@@ -163,6 +164,7 @@ class RecipeService {
 
     // If no quantity pattern found, treat the whole text as name
     return {
+      raw: text,
       name: text.replace(/^[-•]\s*/, '').trim() // Remove bullet points
     };
   }
