@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { RecipeInput } from '@/components/RecipeInput';
 import { PicnicLogin } from '@/components/PicnicLogin';
 import { RecipeCard } from '@/components/RecipeCard';
-import { AddToBasketButton } from '@/components/AddToBasketButton';
+import { MatchSessionPanel } from '@/components/MatchSessionPanel';
 import { recipeService, Recipe } from '@/services/recipeService';
-import { picnicService, PicnicCredentials } from '@/services/picnicService';
+import { picnicService, PicnicCredentials, MatchSessionResponse } from '@/services/picnicService';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { LogOut, Utensils, ShoppingBag } from 'lucide-react';
@@ -12,6 +12,7 @@ import { LogOut, Utensils, ShoppingBag } from 'lucide-react';
 const Index = () => {
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [session, setSession] = useState<MatchSessionResponse | null>(null);
   const [isLoadingRecipe, setIsLoadingRecipe] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const { toast } = useToast();
@@ -21,6 +22,7 @@ const Index = () => {
     try {
       const loadedRecipe = await recipeService.fetchRecipe(url);
       setRecipe(loadedRecipe);
+      setSession(null);
       toast({
         title: 'Recept geladen!',
         description: `${loadedRecipe.title} met ${loadedRecipe.ingredients.length} ingrediënten`,
@@ -40,17 +42,18 @@ const Index = () => {
   const handlePicnicLogin = async (credentials: PicnicCredentials) => {
     setIsLoggingIn(true);
     try {
-      const success = await picnicService.login(credentials);
-      if (success) {
+      const result = await picnicService.login(credentials);
+      if (result.success) {
         setIsLoggedIn(true);
+        setSession(null);
         toast({
-          title: 'Succesvol ingelogd!',
-          description: 'Je bent nu verbonden met je Picnic account',
+          title: 'Verbonden met Picnic',
+          description: result.message,
         });
       } else {
         toast({
           title: 'Inloggen mislukt',
-          description: 'Controleer je inloggegevens en probeer opnieuw',
+          description: result.message,
           variant: 'destructive',
         });
       }
@@ -58,7 +61,7 @@ const Index = () => {
       console.error('Picnic login error:', error);
       toast({
         title: 'Fout bij inloggen',
-        description: 'Er is een fout opgetreden bij het inloggen',
+        description: error instanceof Error ? error.message : 'Er is een fout opgetreden bij het inloggen',
         variant: 'destructive',
       });
     } finally {
@@ -66,10 +69,15 @@ const Index = () => {
     }
   };
 
-  const handleLogout = () => {
-    picnicService.logout();
+  const handleLogout = async () => {
+    try {
+      await picnicService.logout();
+    } catch (error) {
+      console.error('Picnic logout error:', error);
+    }
     setIsLoggedIn(false);
     setRecipe(null);
+    setSession(null);
     toast({
       title: 'Uitgelogd',
       description: 'Je bent uitgelogd bij Picnic',
@@ -125,9 +133,13 @@ const Index = () => {
               <RecipeCard recipe={recipe} />
               
               {isLoggedIn && (
-                <AddToBasketButton recipe={recipe} />
+                <MatchSessionPanel
+                  recipe={recipe}
+                  session={session}
+                  onSessionUpdated={setSession}
+                />
               )}
-              
+
               {!isLoggedIn && recipe && (
                 <div className="text-center p-6 bg-muted/30 rounded-lg border-2 border-dashed border-muted">
                   <p className="text-muted-foreground mb-4">

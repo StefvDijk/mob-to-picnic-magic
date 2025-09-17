@@ -64,7 +64,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
                       : ingredient.quantity || '1x'
                     }
                   </Badge>
-                  <span className="text-sm">{ingredient.name}</span>
+                  <span className="text-sm">{ingredient.raw || ingredient.name}</span>
                 </div>
               ))}
             </div>
