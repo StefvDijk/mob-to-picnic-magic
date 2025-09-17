@@ -57,6 +57,20 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        picnic: {
+          orange: "hsl(var(--picnic-orange))",
+          green: "hsl(var(--picnic-green))",
+          "light-orange": "hsl(var(--picnic-light-orange))",
+          "light-green": "hsl(var(--picnic-light-green))",
+        },
+      },
+      backgroundImage: {
+        "gradient-primary": "var(--gradient-primary)",
+        "gradient-card": "var(--gradient-card)",
+      },
+      boxShadow: {
+        recipe: "var(--shadow-recipe)",
+        ingredient: "var(--shadow-ingredient)",
       },
       borderRadius: {
         lg: "var(--radius)",

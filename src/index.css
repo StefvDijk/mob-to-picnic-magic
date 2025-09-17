@@ -8,26 +8,40 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 0 0% 98%;
+    --foreground: 20 14.3% 4.1%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 20 14.3% 4.1%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 20 14.3% 4.1%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 98%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 60 4.8% 95.9%;
+    --secondary-foreground: 24 9.8% 10%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 60 4.8% 95.9%;
+    --muted-foreground: 25 5.3% 44.7%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 142 76% 36%;
+    --accent-foreground: 0 0% 98%;
+
+    /* Custom design tokens */
+    --picnic-orange: 25 95% 53%;
+    --picnic-green: 142 76% 36%;
+    --picnic-light-orange: 25 100% 90%;
+    --picnic-light-green: 142 50% 90%;
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--picnic-orange)), hsl(var(--picnic-green)));
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(25 100% 98%));
+    
+    /* Shadows */
+    --shadow-recipe: 0 4px 20px -4px hsl(var(--picnic-orange) / 0.1);
+    --shadow-ingredient: 0 2px 10px -2px hsl(var(--picnic-green) / 0.1);
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
@@ -56,26 +70,40 @@ All colors MUST be HSL.
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background: 20 14.3% 4.1%;
+    --foreground: 0 0% 95%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 24 9.8% 10%;
+    --card-foreground: 0 0% 95%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 24 9.8% 10%;
+    --popover-foreground: 0 0% 95%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 9%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 24 9.8% 10%;
+    --secondary-foreground: 0 0% 95%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 24 5.4% 63.9%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 142 76% 36%;
+    --accent-foreground: 0 0% 98%;
+
+    /* Custom design tokens for dark mode */
+    --picnic-orange: 25 95% 53%;
+    --picnic-green: 142 76% 36%;
+    --picnic-light-orange: 25 100% 15%;
+    --picnic-light-green: 142 50% 15%;
+    
+    /* Dark mode gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--picnic-orange)), hsl(var(--picnic-green)));
+    --gradient-card: linear-gradient(145deg, hsl(24 9.8% 10%), hsl(25 100% 8%));
+    
+    /* Dark mode shadows */
+    --shadow-recipe: 0 4px 20px -4px hsl(var(--picnic-orange) / 0.2);
+    --shadow-ingredient: 0 2px 10px -2px hsl(var(--picnic-green) / 0.2);
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
