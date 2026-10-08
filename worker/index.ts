@@ -1,5 +1,6 @@
 import { handleAuth, type AuthDependencies, type AuthEnv } from './auth';
 import { handleAccounts } from './routes/accounts';
+import { handleRecipes } from './routes/recipes';
 import { boundedRequest, privateApiResponse } from './http';
 
 /** Test mail injection is explicitly rejected by the auth module in production. */
@@ -13,6 +14,7 @@ export async function handleRequest(request: Request, env: AuthEnv, deps: AuthDe
     if (bounded instanceof Response) return privateApiResponse(bounded);
     const response = await handleAuth(bounded, env, deps)
       ?? await handleAccounts(bounded, env, deps)
+      ?? await handleRecipes(bounded, env)
       ?? Response.json({ error: { code: 'NOT_FOUND', message: 'Niet gevonden.' } }, { status: 404 });
     return privateApiResponse(response);
   } catch {

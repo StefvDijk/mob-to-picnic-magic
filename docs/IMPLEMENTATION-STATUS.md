@@ -10,10 +10,10 @@ De directeur integreert, bewaakt scope en voert de eindcontrole uit. Vakmanagers
 | --- | --- | --- |
 | Infrastructuurmanager | Workers-runtime, lokale bindings, pakketten, build/testconfig en deployvoorbereiding | Lokale basis geïmplementeerd en akkoord na manager- en directeurscontrole; externe gates blijven open |
 | Databasemanager | D1-schema, tenantrelaties, transacties, budgetten en verwijdering | Basis goedgekeurd na 9 D1-tests; directeur heeft deze en 2 infrastructuurtests herhaald |
-| Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Exacte hoeveelheden en productselectie geïmplementeerd; managerreview en veilige receptbewerkingen lopen |
+| Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Hoeveelheden, recepten en pure selectie goedgekeurd en aangesloten; adapters/imports/uitvoering volgen |
 | Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Eerste implementatie en API-aansluiting gecontroleerd door manager en directeur; 9 gerichte tests groen |
-| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Analyse gestart voor echte login, recepten en account-/beheerinterface |
-| Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Gepland |
+| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Account-/beheerschermen gebouwd; goedkope uitvoerder bouwt receptschermen; managerreview volgt |
+| Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Onafhankelijke review van actuele backend en dependencies gestart |
 | Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Gepland |
 | Kwaliteitsmanager | Integratietests, foutinjectie en acceptatiematrix | Gepland |
 | Directeur | Integratie en definitieve controle tegen alle eisen | Actief |
@@ -75,3 +75,13 @@ Nog geen volledige toevoeg- of verwijderflow: routes moeten herhaalde goedkeurin
 De directeur heeft daarnaast een singleton voor de twee beheer-stopinstellingen toegevoegd (`0002`) en een expliciete netto-/uitlekgewichtbasis voor mandtoewijzingen (`0003`). Die basis mag bij NULL niet als bewezen productmatch worden gebruikt. Accounts-tests en latere producttests toetsen de bijbehorende functionaliteit.
 
 De bekende namen van de authenticatie- en e-mailsecrets staan nu in Wrangler-configuratie en de gegenereerde types. `.dev.vars.example` bevat uitsluitend lege invulvelden. Er zijn geen echte credentials vastgelegd. Ontbrekende secrets veroorzaken bewust geen automatische productie-mock.
+
+### Recepten en berekeningen — manager akkoord, directeur gecontroleerd
+
+De goedkope backenduitvoerder bouwde gedeelde exacte hoeveelheden, portieschaling, de pure productselectie en recept-CRUD. De manager heeft het werk beoordeeld, correcties laten uitvoeren en typechecking herhaald. De directeur las de uiteindelijke code, liet randgevallen voor gewichtsbasis, goedkopere alternatieven en schrijven tijdens accountblokkering herstellen, en sloot de receptmodule aan op de hoofdhandler.
+
+Receptbewerkingen gebruiken een verwachte versie en unieke schrijftoken binnen één D1-batch. Een verliezend gelijktijdig verzoek verandert geen ingrediënten van de winnaar. Migratie `0004` behoudt oudere ingrediënten zolang voorstellen ernaar verwijzen; de uitvoerder heeft deze migratie aanvullend met vooraf gevulde SQLite-tabellen beproefd. De recepttests toetsen bewaren en teruglezen van `1/3`, eigenaarschap, uploadrelaties, gelijktijdig bewerken, behoud van voorstelverwijzingen, blokkeren vlak vóór schrijven en duurzame opruimopdrachten bij verwijderen.
+
+De directeur heeft na aansluiten de volledige huidige Workers-suite uitgevoerd: **36/36 tests geslaagd in 9 bestanden**, plus Worker-typechecking en diffcontrole. Daarna is receptopslag expliciet via de hoofdhandler herhaald: beide recepttests slagen. Dit bewijst nog geen werkende Picnic-koppeling, importverwerking, queueconsumer, fysieke bronverwijdering of volledige browserflow.
+
+Open detail voor de komende opslag-/privacyronde: als een receptbewerking een bron loskoppelt, moet de opruimflow ook die verweesde bron vinden. Receptverwijdering maakt al een outboxopdracht; de daadwerkelijke R2-opruimer wordt nog gebouwd.
