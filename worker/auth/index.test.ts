@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { applyD1Migrations } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createInvitation, createInvitedAccount } from '../db';
+import { createInvitation, createInvitedAccount, getSessionAccess } from '../db';
 import { requirePrincipal, type AuthDependencies, type AuthEnv } from './index';
 import { handleRequest as handleAuth } from '../index';
 
@@ -130,6 +130,17 @@ describe('invite-only Better Auth over D1', () => {
     const principal = await requirePrincipal(new Request('https://picnic.test/api/me', { headers: { Cookie: cookie } }), authEnv);
     expect(principal).toMatchObject({ ownerId, email, role: 'member' });
     expect(principal?.lastVerifiedAt).toBeTruthy();
+    const nativeSession = await db.prepare(`SELECT expiresAt,typeof(expiresAt) AS storageType FROM session WHERE id=?`)
+      .bind(principal?.sessionId).first<{ expiresAt: string; storageType: string }>();
+    expect(nativeSession?.storageType).toBe('text');
+    const access = await getSessionAccess(db, ownerId, principal!.sessionId, Date.now());
+    expect(access.success && access.value.sessionExpiresAt).toBe(Date.parse(nativeSession!.expiresAt));
+    expect(access.success && access.value.sessionExpiresAt).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
+    const meResponse = await handleAuth(new Request('https://picnic.test/api/me', { headers: { Cookie: cookie } }), authEnv);
+    expect(meResponse.status).toBe(200);
+    const meBody = await meResponse.json() as { session: { expiresAt: number } };
+    expect(Number.isSafeInteger(meBody.session.expiresAt)).toBe(true);
+    expect(meBody.session.expiresAt).toBeGreaterThan(Date.now() + 13 * 24 * 60 * 60 * 1000);
 
     const account = await db.prepare('SELECT status FROM app_accounts WHERE id=?').bind(ownerId).first<{ status: string }>();
     expect(account?.status).toBe('active');

@@ -6,6 +6,12 @@ const requireSafeInteger = (value: number, label: string, minimum = 0) => {
   if (!Number.isSafeInteger(value) || value < minimum) throw new TypeError(`${label} must be a safe integer >= ${minimum}`);
 };
 
+/** Better Auth's SQLite adapter writes native dates as ISO text; older fixtures use epoch milliseconds. */
+export const sessionExpiryMillisSql = `CASE WHEN typeof(s.expiresAt) IN ('integer','real')
+  THEN CAST(s.expiresAt AS INTEGER)
+  ELSE CAST(strftime('%s',s.expiresAt) AS INTEGER)*1000
+    + CAST(substr(strftime('%f',s.expiresAt),4,3) AS INTEGER) END`;
+
 export interface SessionAccess {
   ownerId: string;
   sessionId: string;
@@ -24,7 +30,7 @@ const loadSession = (db: Db, ownerId: string, sessionId: string) => db.prepare(`
   SELECT sm.owner_id AS ownerId, sm.session_id AS sessionId,
     sm.authenticated_at AS authenticatedAt, sm.last_activity_at AS lastActivityAt,
     sm.last_verified_at AS lastVerifiedAt, sm.revoked_at AS revokedAt,
-    s.expiresAt AS sessionExpiresAt, a.status AS accountStatus
+    ${sessionExpiryMillisSql} AS sessionExpiresAt, a.status AS accountStatus
   FROM session_metadata sm
   JOIN session s ON s.id = sm.session_id AND s.userId = sm.owner_id
   JOIN app_accounts a ON a.id = sm.owner_id
@@ -35,7 +41,7 @@ export async function createSessionMetadata(db: Db, ownerId: string, sessionId: 
   await db.prepare(`
     INSERT INTO session_metadata(session_id,owner_id,authenticated_at,last_activity_at,last_verified_at,revoked_at)
     SELECT s.id,s.userId,?,?,NULL,NULL FROM session s JOIN app_accounts a ON a.id = s.userId
-    WHERE s.id = ? AND s.userId = ? AND s.expiresAt > ? AND a.status = 'active'
+    WHERE s.id = ? AND s.userId = ? AND (${sessionExpiryMillisSql}) > ? AND a.status = 'active'
     ON CONFLICT(session_id) DO NOTHING
   `).bind(authenticatedAt, authenticatedAt, sessionId, ownerId, authenticatedAt).run();
   const row = await loadSession(db, ownerId, sessionId).first<SessionRow>();
@@ -46,7 +52,7 @@ export async function getSessionAccess(db: Db, ownerId: string, sessionId: strin
   const row = await loadSession(db, ownerId, sessionId).first<SessionRow>();
   if (!row) return { success: false, reason: 'not_found' };
   if (row.accountStatus !== 'active') return { success: false, reason: 'blocked' };
-  if (row.revokedAt !== null || row.authenticatedAt + 30 * 24 * 60 * 60 * 1000 <= now ||
+  if (!Number.isSafeInteger(row.sessionExpiresAt) || row.revokedAt !== null || row.authenticatedAt + 30 * 24 * 60 * 60 * 1000 <= now ||
       row.lastActivityAt + 14 * 24 * 60 * 60 * 1000 <= now || row.sessionExpiresAt <= now) {
     return { success: false, reason: 'expired' };
   }
@@ -60,7 +66,7 @@ export async function touchSession(db: Db, ownerId: string, sessionId: string, n
     WHERE owner_id = ? AND session_id = ? AND revoked_at IS NULL
       AND authenticated_at + 2592000000 > ? AND last_activity_at + 1209600000 > ?
       AND EXISTS (SELECT 1 FROM session s JOIN app_accounts a ON a.id = s.userId
-        WHERE s.id = session_metadata.session_id AND s.userId = ? AND s.expiresAt > ? AND a.status = 'active')
+        WHERE s.id = session_metadata.session_id AND s.userId = ? AND (${sessionExpiryMillisSql}) > ? AND a.status = 'active')
   `).bind(now, ownerId, sessionId, now, now, ownerId, now).run();
   if (!changed.meta.changes) return getSessionAccess(db, ownerId, sessionId, now);
   return getSessionAccess(db, ownerId, sessionId, now);

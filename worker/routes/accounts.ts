@@ -142,6 +142,7 @@ async function invite(request: Request, env: AuthEnv, principal: Principal, deps
     return fail(400, 'INVALID_EMAIL', 'Vul een geldig e-mailadres in.');
   }
   const now = Date.now();
+  const nativeNow = new Date(now).toISOString();
   const id = crypto.randomUUID();
   const userId = crypto.randomUUID();
   const token = randomToken();
@@ -159,7 +160,7 @@ async function invite(request: Request, env: AuthEnv, principal: Principal, deps
   try {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt)
-        VALUES(?,?,?,0,?,?)`).bind(userId, email, email, now, now),
+        VALUES(?,?,?,0,?,?)`).bind(userId, email, email, nativeNow, nativeNow),
       env.DB.prepare(`INSERT INTO invitations(id,email,token_hash,status,invited_by,created_at,expires_at)
         VALUES(?,?,?,'pending',?,?,?)`).bind(id, email, await sha256(token), principal.ownerId, now, now + INVITATION_LIFETIME),
       env.DB.prepare(`INSERT INTO app_accounts(id,email,role,status,invitation_id,created_at,updated_at)

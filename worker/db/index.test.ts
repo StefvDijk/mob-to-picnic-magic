@@ -55,8 +55,9 @@ async function createMember(id: string, email: string) {
 
 async function createSession(ownerId: string, id: string) {
   await db.prepare(`INSERT INTO session(id,expiresAt,token,createdAt,updatedAt,userId) VALUES(?,?,?,?,?,?)`)
-    .bind(id, expires, `token-${id}`, now, now, ownerId).run();
-  await createSessionMetadata(db, ownerId, id, now);
+    .bind(id, ownerId === aliceId ? new Date(expires).toISOString() : expires,
+      `token-${id}`, now, now, ownerId).run();
+  expect(await createSessionMetadata(db, ownerId, id, now)).toBe(true);
 }
 
 async function createProposal(ownerId: string, connectionId: string, proposalId: string, purchaseLineId: string) {
@@ -185,6 +186,23 @@ describe('D1 repository invariants', () => {
     await createSession(bobId, blockedSession);
     await db.prepare(`UPDATE app_accounts SET status='blocked' WHERE id=?`).bind(bobId).run();
     expect(await getSessionAccess(db, bobId, blockedSession, now + 1)).toEqual({ success: false, reason: 'blocked' });
+  });
+
+  it('normalizes Better Auth ISO expiry to exact milliseconds and refuses expired native sessions', async () => {
+    const expiryAt = now + 3 * 60 * 60 * 1000 + 123;
+    const sessionId = 'db-test-session-iso';
+    await db.prepare(`INSERT INTO session(id,expiresAt,token,createdAt,updatedAt,userId) VALUES(?,?,?,?,?,?)`)
+      .bind(sessionId, new Date(expiryAt).toISOString(), `token-${sessionId}`,
+        new Date(now).toISOString(), new Date(now).toISOString(), aliceId).run();
+    expect(await createSessionMetadata(db, aliceId, sessionId, now)).toBe(true);
+    const access = await getSessionAccess(db, aliceId, sessionId, now);
+    expect(access.success && access.value.sessionExpiresAt).toBe(expiryAt);
+    expect((await touchSession(db, aliceId, sessionId, expiryAt)).success).toBe(false);
+    const expiredId = 'db-test-session-iso-already-expired';
+    await db.prepare(`INSERT INTO session(id,expiresAt,token,createdAt,updatedAt,userId) VALUES(?,?,?,?,?,?)`)
+      .bind(expiredId, new Date(now - 1).toISOString(), `token-${expiredId}`,
+        new Date(now).toISOString(), new Date(now).toISOString(), aliceId).run();
+    expect(await createSessionMetadata(db, aliceId, expiredId, now)).toBe(false);
   });
 
   it('keeps approval history if its starting Better Auth session is deleted and refuses later sends', async () => {
