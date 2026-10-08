@@ -33,6 +33,14 @@ async function importFixture(status = 'queued', lease: number | null = null): Pr
 }
 
 describe('queue composition with durable D1 imports', () => {
+  it('routes addition jobs only on the addition queue and rejects unknown versions', async () => {
+    const missing = delivery({ kind: 'add', taskId: 'missing-action', version: 1 }, 'picnic-additions-test');
+    await handleQueue(missing.batch, env);
+    expect(missing.message.ack).toHaveBeenCalledOnce();
+    const unsupported = delivery({ kind: 'add', taskId: 'missing-action', version: 2 }, 'picnic-additions-test');
+    await handleQueue(unsupported.batch, env);
+    expect(unsupported.message.retry).toHaveBeenCalledOnce();
+  });
   it('acknowledges only after the result is saved and handles a duplicate without changing it', async () => {
     const id = await importFixture();
     const first = delivery({ kind: 'import', taskId: id, version: 1 });

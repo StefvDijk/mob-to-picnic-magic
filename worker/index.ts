@@ -8,6 +8,9 @@ import { runMaintenance } from './jobs/maintenance';
 import { handleImports } from './routes/imports';
 import { dispatchImportOutbox } from './imports/outbox';
 import { handleQueue } from './queue';
+import { handleProposals } from './routes/proposals';
+import { handleActions } from './routes/actions';
+import { dispatchAdditionOutbox } from './additions/outbox';
 
 /** Test mail injection is explicitly rejected by the auth module in production. */
 export async function handleRequest(request: Request, env: AuthEnv & PicnicKeyEnv, deps: AuthDependencies & PicnicDependencies = {}): Promise<Response> {
@@ -23,6 +26,8 @@ export async function handleRequest(request: Request, env: AuthEnv & PicnicKeyEn
       ?? await handleAccounts(bounded, env, deps)
       ?? await handleRecipes(bounded, env)
       ?? await handlePicnic(bounded, env, deps)
+      ?? await handleProposals(bounded, env, deps)
+      ?? await handleActions(bounded, env)
       ?? await handleImports(bounded, env)
       ?? Response.json({ error: { code: 'NOT_FOUND', message: 'Niet gevonden.' } }, { status: 404 });
     return privateApiResponse(response);
@@ -41,10 +46,13 @@ export default {
       // The outbox was committed before the response; cron also recovers a failed immediate dispatch.
       ctx.waitUntil(dispatchImportOutbox(env));
     }
+    if (request.method === 'POST' && /\/api\/proposals\/[^/]+\/approve$/.test(new URL(request.url).pathname) && response.ok) {
+      ctx.waitUntil(dispatchAdditionOutbox(env));
+    }
     return response;
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
-    ctx.waitUntil(Promise.all([runMaintenance(env), dispatchImportOutbox(env)]));
+    ctx.waitUntil(Promise.all([runMaintenance(env), dispatchImportOutbox(env), dispatchAdditionOutbox(env)]));
   },
   queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     return handleQueue(batch, env);

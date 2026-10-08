@@ -1,5 +1,7 @@
 # MVP uitvoering
 
+> Herprioritering 8 oktober: [MVP-FOCUS.md](MVP-FOCUS.md) bepaalt nu de eerste oplevergrens. Het volledige bouwplan is de backlog. Het onafgeronde AI-werk is apart bewaard in Git-stash `Park AI text recognition for focused MVP; original Picnic service excluded`. De route recept → productvoorstel → goedgekeurde Picnic-mand krijgt voorrang. Onderstaande bewijsregistratie is historische status, geen lijst van verplichte nieuwe reviewrondes.
+
 Start 8 oktober 2026. De gebruiker heeft het bouwplan goedgekeurd en opdracht gegeven de MVP met directeur, managers en goedkopere uitvoerders te bouwen. Deze opdracht vervangt de eerdere grens ‘alleen specificeren’. Het volledige [bouwplan](BOUWPLAN.md) blijft de scope; een demonstratie met mocks is geen afgeronde pilot.
 
 ## Werkverdeling
@@ -143,3 +145,15 @@ De directeur herhaalde op de uiteindelijke code **94/94 tests in 16 bestanden**,
 De directeur inspecteerde het script en herhaalde **5/5 Node/SQLite-tests**, waaronder twee echte gelijktijdige verbindingen, een reeds bestaande native gebruiker en rollback bij een mislukte tweede insert. Vanuit `/tmp` weigert de read-only CLI terecht de bestaande lokale database; de productieplaceholder wordt vóór netwerkgebruik geweigerd. Er is geen beheerder aangemaakt en geen remote database gebruikt. Provisioning, e-mailconfiguratie en de eerste echte OTP-login blijven operationele pilotstappen.
 
 De onafhankelijke beveiligingsreview vond daarna een P1 in de lokale omgeving: zonder ID gebruikte Wrangler voor development én test dezelfde D1-bindingidentiteit. Test heeft nu expliciet `preview_database_id: picnic-test-local`; development behoudt zijn bestaande `DB`-identiteit. De infrastructuurmanager bewees scheiding via zowel D1 CLI als lokale Workers in tijdelijke opslag. De directeur herhaalde de CLI-proef onafhankelijk: de testmarker bestaat alleen in test (1 versus 0), zonder bestaande databases aan te raken. De bootstrap-CLI weigert daarnaast lokale testdoelen met dezelfde identiteit als development. Met deze regressie zijn **6/6 CLI-tests** groen. Binnen de begrensde import-/bronreview werden geen aanvullende concrete P1/P2-bevindingen gevonden.
+
+### Gefocuste MVP-route — lokaal geïntegreerd
+
+De uitvoer is herprioriteerd volgens MVP-FOCUS.md. Het AI-werk is veilig geparkeerd als stashcommit `70101831ec68fbc40153b04fc52a96767615c0b8`; herstel vereist later hernummering van de AI-migratie omdat 0010 nu de toevoegbeveiliging bevat. De oorspronkelijke Picnic-servicewijziging blijft buiten de commits.
+
+Nieuwe route: opgeslagen recept → porties → zelf geschikte zoekresultaten bevestigen → goedkoopste voldoende verpakking → servercontrole van actuele Picnic-prijzen → expliciete goedkeuring → duurzame toevoegactie → status/herstel. De gebruiker bevestigt een ontbrekende netto/uitlekbasis; de app verzint geen productmatch of gewichtsomrekening. Voor deze eerste versie wordt per ingrediënt één SKU gekozen. Onbekende hoeveelheden moeten eerst in de recepteditor worden gecorrigeerd.
+
+De server bewaart voorstel, ingrediënten en productregels atomisch met de actuele receptversie en Picnic-koppeling. Goedkeuren gebruikt alleen de opgeslagen regels. Herhaalde of gelijktijdige goedkeuring geeft dezelfde actie terug. Een onbekende externe uitkomst wordt niet opnieuw verstuurd; volgende regels stoppen. De gebruiker kan na controle van de Picnic-mand de uitkomst bevestigen. Herladen kan de actie via de bewaarde voorstel-ID terugvinden. Er wordt niet besteld of afgerekend.
+
+Directeurscontrole: **123/123 tests in 21 bestanden**, Worker- en app-TypeScript en productiebuild geslaagd. De integratieproef doorloopt de HTTP-hoofdhandler van receptaanmaak tot geslaagde toevoegactie en bewijst één leveranciersaanroep bij herhaalde goedkeuring/verwerking. Externe antwoorden zijn fictief. In de echte lokale browser is de portieschaling 1/3→2/3 kg gecontroleerd en heeft het productenscherm op 320px geen horizontale overflow. De bestaande lokale import-/bronketen is eveneens opnieuw geslaagd.
+
+Echte proef nog open: `RESEND_API_KEY` en `EMAIL_FROM` zijn lokaal leeg; de browser-testaccount heeft geen echte Picnic-koppeling. Er is geen mail verstuurd, geen echte mand gewijzigd en niets uitgerold. Deze ontbrekende configuratie en leveranciersproef zijn de eerstvolgende stap, geen extra features of reviewrondes.

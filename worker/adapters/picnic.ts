@@ -35,6 +35,24 @@ export class PicnicTimeoutError extends PicnicTransportUncertainError {
 }
 class PicnicRejectedError extends Error {}
 
+/** Only call after the durable execution line has been marked sending. Never retries. */
+export async function addPicnicProduct(authKey: string, productId: string, count: number): Promise<void> {
+  if (!authKey || !productId || productId.length > 100 || !Number.isSafeInteger(count) || count < 1 || count > 10_000) {
+    throw new TypeError('Invalid Picnic addition');
+  }
+  try {
+    const result = await picnicRequest('/cart/add_product', {
+      method: 'POST', authKey, headers: true, body: { product_id: productId, count },
+    });
+    // A readable cart response confirms receipt; a malformed success is still uncertain.
+    const cart = record(result.data);
+    if (!cart || cart.type !== 'ORDER' || !Array.isArray(cart.items)) throw new PicnicTransportUncertainError();
+  } catch {
+    // Even a rejection may follow a provider-side write. Never silently retry a cart mutation.
+    throw new PicnicTransportUncertainError();
+  }
+}
+
 async function limitedBody(response: Response): Promise<unknown> {
   if (!response.body) return null;
   const reader = response.body.getReader();

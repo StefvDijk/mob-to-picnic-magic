@@ -1,6 +1,8 @@
 import type { RecipeDto, RecipeIngredientDto, RecipeImportSourceInput } from '../../shared/recipes';
 import type { PicnicCart, PicnicConnectResponse, PicnicConnectionDto, PicnicProduct } from '../../shared/picnic';
 import type { ImportDto } from '../../shared/imports';
+import type { ProposalChoiceInput, ProposalDto } from '../../shared/proposals';
+import type { ActionDto } from '../../shared/actions';
 
 export type { RecipeDto, RecipeIngredientDto };
 
@@ -71,6 +73,12 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 export const api = {
+  approveProposal: (id: string, expectedVersion: number) => request<{ action: ActionDto }>(`/api/proposals/${encodeURIComponent(id)}/approve`, 'POST', { expectedVersion }),
+  getAction: (id: string) => request<{ action: ActionDto }>(`/api/actions/${encodeURIComponent(id)}`),
+  getProposalAction: (id: string) => request<{ action: ActionDto }>(`/api/proposals/${encodeURIComponent(id)}/action`),
+  resolveAction: (id: string, lineId: string, resolution: 'confirmed_added' | 'confirmed_not_added') => request<{ action: ActionDto }>(`/api/actions/${encodeURIComponent(id)}/resolve`, 'POST', { lineId, resolution }),
+  createProposal: (input: { recipeId: string; recipeVersion: number; servings: string; choices: ProposalChoiceInput[] }) => request<{ proposal: ProposalDto }>('/api/proposals', 'POST', input),
+  getProposal: (id: string) => request<{ proposal: ProposalDto }>(`/api/proposals/${encodeURIComponent(id)}`),
   me: () => request<MeDto>('/api/me'),
   sendCode: (email: string) => request<{ success: true }>('/api/auth/email-otp/send-verification-otp', 'POST', { email, type: 'sign-in' }),
   signIn: (email: string, otp: string) => request<unknown>('/api/auth/sign-in/email-otp', 'POST', { email, otp }),

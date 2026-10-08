@@ -6,6 +6,7 @@ import type { Quantity, QuantityUnit } from '../../shared/quantities';
 import { parseQuantity, parseRational } from '../../shared/quantities';
 import { recipeInputFromImport } from '@/lib/import-draft';
 import { ImportPanel } from '@/components/ImportPanel';
+import { RecipeProducts } from '@/components/RecipeProducts';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 
@@ -17,7 +18,7 @@ type IngredientDraft = {
 type ImportSourceDraft = RecipeImportSourceInput & { candidateCount?: number };
 type SourcePreview = { sourceKind: ImportDto['sourceKind']; sourceText: string | null; sourceUrl: string | null; sourceLabel: string | null; selectedCandidate: ImportCandidate | null };
 type Draft = { title: string; sourceLabel: string; sourceUrl: string; baseServings: string; steps: string[]; uploads: string[]; ingredients: IngredientDraft[]; importSource?: ImportSourceDraft; sourcePreview?: SourcePreview };
-type View = 'list' | 'detail' | 'edit' | 'import';
+type View = 'list' | 'detail' | 'products' | 'edit' | 'import';
 const EMPTY_INGREDIENT: IngredientDraft = { originalText: '', normalizedName: '', section: '', kind: 'unknown', amount: '', maximum: '', unit: 'g', basis: '', sourceOrigin: 'user', attributes: {}, uncertainty: [] };
 const freshDraft = (): Draft => ({ title: '', sourceLabel: '', sourceUrl: '', baseServings: '', steps: [], uploads: [], ingredients: [{ ...EMPTY_INGREDIENT }] });
 const unitNames: Record<QuantityUnit, string> = { g: 'gram', kg: 'kilogram', ml: 'milliliter', l: 'liter', piece: 'stuk' };
@@ -310,6 +311,10 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
     <ImportPanel key={me.account.id} ownerId={me.account.id} onAuthExpired={onAuthExpired} onUseCandidate={useImportCandidate} onClose={() => { setView('list'); setError(''); }} />
   </section>;
 
+  if (view === 'products' && selected) return <section className="recipe-workspace">
+    <RecipeProducts key={selected.id} recipe={selected} onBack={() => setView('detail')} onEdit={() => edit(selected)} onAuthExpired={onAuthExpired} />
+  </section>;
+
   return <section className="recipe-workspace" aria-labelledby="recipes-title">
     <div className="recipe-heading"><div><p className="eyebrow">Jouw kookboek</p><h1 id="recipes-title">Mijn recepten</h1><p className="subtle">Bewaar je recepten en pas ze aan wanneer je wilt.</p></div>
       <div className="recipe-heading-actions"><Button type="button" variant="outline" onClick={() => { setView('import'); setError(''); }}>Importeer recept</Button><Button type="button" onClick={() => edit(null)}>＋ Nieuw recept</Button></div></div>
@@ -341,6 +346,7 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
       <p className="eyebrow">{selected.sourceLabel || 'Eigen recept'}</p><h2>{selected.title}</h2>
       {selected.sourceUrl && <p><a href={selected.sourceUrl} target="_blank" rel="noreferrer">Bekijk de bron ↗</a></p>}
       <p className="recipe-meta">{selected.baseServings ? `${selected.baseServings} porties` : 'Porties niet opgegeven'} · versie {selected.version}</p>
+      <Button type="button" onClick={() => setView('products')}>Producten kiezen</Button>
       {selected.uploads.length > 0 && <p className="recipe-meta">{selected.uploads.length} bronafbeelding(en) gekoppeld</p>}
       <div className="recipe-detail-columns"><section><h3>Ingrediënten</h3>{selected.ingredients.length ? <ul className="ingredient-list">{selected.ingredients.map(item => <li key={item.id}><span>{formatQuantity(item.quantity)}</span><strong>{item.originalText}</strong>{item.uncertainty.length > 0 && <small>{item.uncertainty.join(' · ')}</small>}</li>)}</ul> : <p className="subtle">Nog geen ingrediënten toegevoegd.</p>}</section>
         <section><h3>Bereiding</h3>{selected.steps.length ? <ol className="step-list">{selected.steps.map((step, index) => <li key={index}>{step}</li>)}</ol> : <p className="subtle">Nog geen bereidingsstappen toegevoegd.</p>}</section></div>

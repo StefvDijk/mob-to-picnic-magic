@@ -62,3 +62,14 @@ Receptdetail en schrijfresultaten bevatten `sourceSnapshot` (of `null`); de rece
 Queueberichten bevatten versie, taaksoort en ID; nooit broninhoud, wachtwoorden of sleutels. Productprijzen worden altijd door de server uit de adapter gehaald. Testmodus vereist expliciete configuratie en blijft herkenbaar; productie kan nooit op ontbrekende credentials reageren met een succesvolle mock.
 
 Frontendteams mogen ondertussen tegen contractfixtures werken, maar de eindcontrole vereist echte routes met lokale D1/R2 en gesimuleerde externe providers. Fixtures worden niet stilzwijgend de productiebackend.
+
+## Gefocuste MVP: productvoorstel en toevoegactie
+
+- `POST /api/proposals`: `{recipeId, recipeVersion, servings, choices:[{ingredientId, query, productId, basis}]}`. Prijzen en verpakkingen worden opnieuw bij Picnic opgehaald; antwoord `{proposal}` met versie, vervaldatum, regels en totaal.
+- `GET /api/proposals/:id`: eigen actuele voorstel, of 409 als het verlopen/achterhaald is.
+- `POST /api/proposals/:id/approve`: `{expectedVersion}`. Antwoord `{action}`; herhaling geeft dezelfde actie terug.
+- `GET /api/proposals/:id/action`: terugvinden van een eerder aangemaakte actie, ook na een verloren goedkeuringsantwoord.
+- `GET /api/actions/:id`: eigenaargebonden status met regels.
+- `POST /api/actions/:id/resolve`: `{lineId, resolution:'confirmed_added'|'confirmed_not_added'}` na controle door de gebruiker. Dit verstuurt niets opnieuw.
+
+Migratie 0010 controleert de actuele receptversie en toevoegschakelaar atomisch bij goedkeuren en verzenden. `purchase_lines.price_cents` is de prijs per verpakking; totaal is prijs maal `pack_count`. Queueberichten bevatten alleen actie-ID en versie. Onbekende uitkomsten blijven geblokkeerd voor automatisch opnieuw verzenden.
