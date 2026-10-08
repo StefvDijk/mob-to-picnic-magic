@@ -30,6 +30,14 @@ test('CLI defaults to dry-run and refuses unsafe remote targets', () => {
   assert.equal(parseArgs(valid).email, 'admin@example.com');
 });
 
+test('local test bootstrap rejects a shared development database identity', () => {
+  const options = parseArgs(['--env', 'test', '--email', 'fixture@example.invalid']);
+  assert.throws(() => validateTarget(options, remoteConfig), /must be isolated/);
+  const isolated = { ...remoteConfig, env: { ...remoteConfig.env,
+    test: { d1_databases: [{ binding: 'DB', preview_database_id: 'picnic-test-local' }] } } };
+  assert.equal(validateTarget(options, isolated), 'DB');
+});
+
 async function newIsolatedDatabase() {
   const db = new DatabaseSync(':memory:');
   db.exec(await readFile(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));

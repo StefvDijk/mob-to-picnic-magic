@@ -64,7 +64,7 @@
         "APP_ORIGIN": "http://localhost:5173"
       },
       "d1_databases": [
-        { "binding": "DB", "database_name": "picnic-test" }
+        { "binding": "DB", "database_name": "picnic-test", "preview_database_id": "picnic-test-local" }
       ],
       "r2_buckets": [
         { "binding": "UPLOADS", "bucket_name": "picnic-uploads-test" }

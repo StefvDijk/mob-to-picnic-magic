@@ -59,6 +59,15 @@ export function getDatabaseId(config, environment) {
 export function validateTarget(options, config) {
   const databases = options.env === 'development' ? config.d1_databases : config.env?.[options.env]?.d1_databases;
   if (!Array.isArray(databases) || !databases.some((database) => database.binding === 'DB')) throw new Error('Selected Wrangler environment has no DB binding');
+  if (!options.remote && options.env === 'test') {
+    const localIdentity = (entries) => {
+      const entry = entries?.find((database) => database.binding === 'DB');
+      return entry?.preview_database_id ?? entry?.database_id ?? entry?.binding;
+    };
+    if (localIdentity(databases) === localIdentity(config.d1_databases)) {
+      throw new Error('Local test database must be isolated from development');
+    }
+  }
   if (options.remote) {
     const configuredId = getDatabaseId(config, options.env);
     if (!configuredId || !UUID_PATTERN.test(configuredId)) {

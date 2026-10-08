@@ -9,8 +9,11 @@ beschrijven verwijdering en herstel in detail.
 
 Gebruik Node.js 24 en de vastgelegde npm-lockfile. Voer de migraties uit voordat
 de Worker account- of receptroutes verwerkt. De standaardomgeving gebruikt de
-lokale database `picnic-local`; `--env test` selecteert de afzonderlijke lokale
-database `picnic-test`.
+lokale D1-identiteit `DB`; `--env test` gebruikt
+`preview_database_id: picnic-test-local` en daardoor een afzonderlijke lokale
+D1-bestandenset. De namen `picnic-local` en `picnic-test` zijn labels, geen
+lokale opslagidentiteiten. De test-Worker, testmigraties en bootstrap-CLI
+selecteren alle drie diezelfde testbinding.
 
 ```sh
 npm ci
