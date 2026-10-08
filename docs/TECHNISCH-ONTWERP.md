@@ -11,7 +11,7 @@ Ontwerpbesluit van 8 oktober 2026. We bouwen een mobiele React-website met een k
 | Relationele opslag | D1, één database per omgeving | Accounts, recepten, goedkeuringen en uitvoeringsstatus hebben relaties en unieke voorwaarden |
 | Afbeeldingen | Private R2 Standard-bucket | Bestanden buiten de relationele database, alleen bereikbaar na autorisatie |
 | Authenticatie | Better Auth met D1 en Email OTP | Bestaande sessie- en inlogfunctionaliteit; aanvullende appregels voor uitnodigingen en sessiegrenzen |
-| E-mail | Resend Free met geverifieerd afzenderdomein | Voldoende startcapaciteit zonder betaald abonnement |
+| E-mail | Cloudflare Email Service | Eén leverancier; gratis besloten proef met vooraf geverifieerde ontvangers |
 | Achtergrondwerk | Cloudflare Queues, aparte wachtrijen voor imports en toevoegen | Werk blijft bestaan als de browser sluit; fouten blokkeren niet de hele website |
 | Periodiek onderhoud | Scheduled Worker | Verwijdertaken, verlopen concepten, controle op vastgelopen acties en achterstallige wachtrijberichten |
 | Picnic | Exact vastgezette `picnic-api` 4.x-release achter eigen adapter | Migratie beheersbaar maken; geen wrapper in de browser |
@@ -46,7 +46,7 @@ Gecontroleerd tegen officiële documentatie op 8 oktober 2026. Bedragen zijn USD
 | D1 Free | 5 miljoen gelezen en 100.000 geschreven rijen/dag; maximaal 500 MB per database | Indexeren op eigenaar en status; afbeeldingen niet in D1 |
 | R2 Standard | 10 GB-maand, 1 miljoen Class A en 10 miljoen Class B-operaties per maand gratis | Stel eigen opslaglimieten in; R2 is geen onbeperkt gratis opslagproduct |
 | Queues Free | 10.000 operaties/dag; 24 uur berichtbewaring | Bewaar de taak ook in D1; een verlopen queuebericht mag geen werk laten verdwijnen |
-| Resend Free | 3.000 e-mails/maand, maximaal 100/dag | Houd een gezamenlijke verzendlimiet aan, inclusief uitnodigingen en verificatie |
+| Cloudflare Email Service | Op Free alleen vooraf geverifieerde ontvangers; Workers Paid bevat 3.000 uitgaande mails/maand | Bestaande appquota blijven gelden; geen automatische betaalde upgrade |
 
 Bronnen: [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [D1-prijzen](https://developers.cloudflare.com/d1/platform/pricing/), [D1-limieten](https://developers.cloudflare.com/d1/platform/limits/), [R2](https://developers.cloudflare.com/r2/pricing/), [Queues](https://developers.cloudflare.com/queues/platform/pricing/), [Resend](https://resend.com/pricing).
 
@@ -54,7 +54,7 @@ Ontwerpkeuze: eerst Free toetsen. Acceptatie vereist marge, niet slechts één s
 
 Voorbeeldbelasting, geen gemeten prognose: tien gebruikers met ieder 40 imports per maand, gemiddeld twee afbeeldingen van 1 MB per import, voegen circa 0,8 GB bronafbeeldingen per maand toe. Daarom kiezen we aanvankelijk 500 MB uploadopslag per gebruiker en 5 GB voor de hele pilot. Bij bereiken van die grens stoppen nieuwe uploads met een duidelijke melding; bestaande recepten blijven bruikbaar. Met deze aannames is de eerste maand mogelijk binnen gratis limieten, niet onbeperkt alle toekomstige maanden.
 
-Cloudflare Email Sending is onderzocht als alternatief, maar vrij versturen aan willekeurige ontvangers vereist nu Workers Paid; het vervangt Resend daarom niet in het gratis startpad. [Cloudflare e-mailprijzen](https://developers.cloudflare.com/email-service/platform/pricing/).
+Herzien op verzoek van de gebruiker: Cloudflare Email Service vervangt Resend om leveranciers te beperken. Het gratis startpad verifieert iedere ontvanger vooraf. Vrij versturen aan willekeurige ontvangers vereist Workers Paid en blijft een apart kostenbesluit. [Cloudflare e-mailprijzen](https://developers.cloudflare.com/email-service/platform/pricing/).
 
 ## Uitvoering zonder dubbele boodschappen
 
@@ -88,11 +88,11 @@ Better Auth vernieuwt sessieverval bij gebruik. We bewaken de gekozen 30 dagen a
 
 ## Locatie en verwijdering
 
-Kies bij creatie EU-jurisdictie voor D1 en R2 waar beschikbaar. Dat beperkt deze opslag, niet automatisch alle verwerking door Workers, Picnic, Resend of AI. We noemen de complete app daarom niet ‘uitsluitend EU’. [D1-locatie](https://developers.cloudflare.com/d1/configuration/data-location/), [R2-locatie](https://developers.cloudflare.com/r2/reference/data-location/).
+Kies bij creatie EU-jurisdictie voor D1 en R2 waar beschikbaar. Dat beperkt deze opslag, niet automatisch alle verwerking door Workers, Picnic, Cloudflare Email Service of AI. We noemen de complete app daarom niet ‘uitsluitend EU’. [D1-locatie](https://developers.cloudflare.com/d1/configuration/data-location/), [R2-locatie](https://developers.cloudflare.com/r2/reference/data-location/).
 
 D1 Time Travel bewaart herstelpunten zeven dagen op Free en 30 dagen op Paid. Verwijderingen moeten na herstel opnieuw worden toegepast vóór heropening. Bewaar daarom een minimale verwijderlijst buiten de herstelde database, met dezelfde maximale bewaartermijn; herstel mag verwijderde accounts of Picnic-sleutels niet reactiveren. R2-kopieën die we zelf als back-up maken krijgen maximaal 30 dagen bewaartijd. [D1-herstel](https://developers.cloudflare.com/d1/reference/time-travel/).
 
-Eigen actieve opslag kan binnen 24 uur worden opgeschoond als ontwerpdoel. Leverancierslogs verdwijnen niet noodzakelijk tegelijk: Resend vermeldt 30 dagen e-mail/logretentie; OpenAI kent standaard misbruikmonitoring tot 30 dagen en uitzonderingen. Gebruik `store:false`, geen AI-conversatieopslag en minimale e-mailinhoud. We beloven dus niet dat leveranciersdata binnen 24 uur verdwijnt. Deze grens moet vóór de pilot in de privacy-uitleg en leverancierscontrole kloppen. [Resend](https://resend.com/pricing), [OpenAI-gegevensbeleid](https://developers.openai.com/api/docs/guides/your-data).
+Eigen actieve opslag kan binnen 24 uur worden opgeschoond als ontwerpdoel. Leverancierslogs verdwijnen niet noodzakelijk tegelijk: de mailretentie van Cloudflare moet bij inrichting worden gecontroleerd; OpenAI kent standaard misbruikmonitoring tot 30 dagen en uitzonderingen. Gebruik `store:false`, geen AI-conversatieopslag en minimale e-mailinhoud. We beloven dus niet dat leveranciersdata binnen 24 uur verdwijnt. Deze grens moet vóór de pilot in de privacy-uitleg en leverancierscontrole kloppen. [Resend](https://resend.com/pricing), [OpenAI-gegevensbeleid](https://developers.openai.com/api/docs/guides/your-data).
 
 ## Omgevingen en beheer
 

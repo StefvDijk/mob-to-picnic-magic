@@ -19,7 +19,7 @@ export interface AuthEnv {
   EMAIL_ADDRESS_HMAC_SECRET: string;
   APP_ORIGIN: string;
   APP_ENV?: string;
-  RESEND_API_KEY?: string;
+  EMAIL?: SendEmail;
   EMAIL_FROM?: string;
 }
 
@@ -79,19 +79,39 @@ function isProduction(env: AuthEnv): boolean {
   return (env.APP_ENV ?? 'production') === 'production';
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]!);
+}
+
 async function deliver(env: AuthEnv, deps: AuthDependencies, message: { to: string; subject: string; text: string }): Promise<void> {
   if (deps.sendEmail) {
     if (isProduction(env)) throw new Error('Mail capture is disabled in production');
     await deps.sendEmail(message);
     return;
   }
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) throw new Error('Email provider is not configured');
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: env.EMAIL_FROM, to: [message.to], subject: message.subject, text: message.text }),
-  });
-  if (!response.ok) throw new Error(`Email provider returned ${response.status}`);
+  const from = env.EMAIL_FROM?.trim();
+  if (!env.EMAIL || !from) throw new Error('Email provider is not configured');
+  let result: EmailSendResult;
+  try {
+    result = await env.EMAIL.send({
+      to: message.to,
+      from: { email: from, name: 'Mijn recepten' },
+      subject: message.subject,
+      text: message.text,
+      html: escapeHtml(message.text).replace(/\r?\n/g, '<br>'),
+    });
+  } catch {
+    throw new Error('Email delivery failed');
+  }
+  if (typeof result?.messageId !== 'string' || !result.messageId.trim()) {
+    throw new Error('Email provider did not return a message ID');
+  }
 }
 
 /** The caller owns email quota reservation and settlement for invitations. */

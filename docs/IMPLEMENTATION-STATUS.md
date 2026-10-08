@@ -157,3 +157,9 @@ De server bewaart voorstel, ingrediënten en productregels atomisch met de actue
 Directeurscontrole: **123/123 tests in 21 bestanden**, Worker- en app-TypeScript en productiebuild geslaagd. De integratieproef doorloopt de HTTP-hoofdhandler van receptaanmaak tot geslaagde toevoegactie en bewijst één leveranciersaanroep bij herhaalde goedkeuring/verwerking. Externe antwoorden zijn fictief. In de echte lokale browser is de portieschaling 1/3→2/3 kg gecontroleerd en heeft het productenscherm op 320px geen horizontale overflow. De bestaande lokale import-/bronketen is eveneens opnieuw geslaagd.
 
 Echte proef nog open: `RESEND_API_KEY` en `EMAIL_FROM` zijn lokaal leeg; de browser-testaccount heeft geen echte Picnic-koppeling. Er is geen mail verstuurd, geen echte mand gewijzigd en niets uitgerold. Deze ontbrekende configuratie en leveranciersproef zijn de eerstvolgende stap, geen extra features of reviewrondes.
+
+### Cloudflare-mail in plaats van Resend
+
+Op verzoek van de gebruiker gebruikt de app nu de native Cloudflare EMAIL-binding. De afzender is `noreply@devstef.nl`, beperkt via de binding. De app heeft geen Resend-sleutel meer nodig. Providerfouten worden gesaneerd; quota blijven behouden bij onzekere uitkomsten. Root controleerde **8/8 auth-/accounttests**, Worker-TypeScript en diffcontrole. De oorspronkelijke Picnic-servicewijziging is ongewijzigd.
+
+Publieke DNS bevestigt `elias.ns.cloudflare.com` en `davina.ns.cloudflare.com` voor devstef.nl. De CLI-aanmelding is verlopen. Het dashboard bood het bestaande GitHub-profiel aan; hernieuwde toegang tot die GitHub-inlogstap is door automatische browserreview geweigerd. De gebruiker moet de login afronden. Domeinonboarding, verificatie van ontvangers en live-mailproef zijn nog niet uitgevoerd; geen betaald plan of DNS-wijziging is geactiveerd.

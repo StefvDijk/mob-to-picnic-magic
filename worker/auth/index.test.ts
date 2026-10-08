@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { applyD1Migrations } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createInvitation, createInvitedAccount, getSessionAccess } from '../db';
 import { requirePrincipal, type AuthDependencies, type AuthEnv } from './index';
 import { handleRequest as handleAuth } from '../index';
@@ -95,6 +95,62 @@ describe('invite-only Better Auth over D1', () => {
       .bind(day).first<{ sentCount: number; reservedCount: number }>();
     expect(usage?.sentCount).toBe((before?.sentCount ?? 0) + 1);
     expect(usage?.reservedCount).toBe(0);
+  });
+
+  it('sends OTP mail through the Cloudflare binding without making an HTTP request', async () => {
+    const email = `${crypto.randomUUID()}@example.invalid`;
+    await makeInvitedAccount(email);
+    let captured: EmailMessageBuilder | undefined;
+    const emailEnv: AuthEnv = {
+      ...authEnv,
+      EMAIL_FROM: 'noreply@devstef.nl',
+      EMAIL: { send: async (message) => { captured = message as EmailMessageBuilder; return { messageId: 'cf-message-123' }; } },
+    };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      const response = await handleAuth(post('/api/auth/email-otp/send-verification-otp', { email, type: 'sign-in' }), emailEnv);
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({ success: true });
+      expect(captured).toMatchObject({
+        to: email,
+        from: { email: 'noreply@devstef.nl', name: 'Mijn recepten' },
+        subject: 'Je Picnic-inlogcode',
+      });
+      expect(captured?.text).toMatch(/Je inlogcode is \d{6}/);
+      expect(captured?.html).toBe(captured?.text?.replace(/\r?\n/g, '<br>'));
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const send = await db.prepare(`SELECT status FROM email_sends WHERE owner_id=(SELECT id FROM app_accounts WHERE email=? COLLATE NOCASE) ORDER BY created_at DESC LIMIT 1`)
+        .bind(email).first<{ status: string }>();
+      expect(send?.status).toBe('sent');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('does not mark a send as sent when the binding is missing or throws', async () => {
+    const missingEmail = `${crypto.randomUUID()}@example.invalid`;
+    const missingOwner = await makeInvitedAccount(missingEmail);
+    const missingBindingEnv: AuthEnv = { ...authEnv, EMAIL: undefined, EMAIL_FROM: 'noreply@devstef.nl' };
+    const missingResponse = await handleAuth(post('/api/auth/email-otp/send-verification-otp', { email: missingEmail, type: 'sign-in' }), missingBindingEnv);
+    expect(missingResponse?.status).toBe(200);
+    const missingSend = await db.prepare(`SELECT status FROM email_sends WHERE owner_id=? ORDER BY created_at DESC LIMIT 1`)
+      .bind(missingOwner).first<{ status: string }>();
+    expect(missingSend?.status).toBe('unknown');
+    expect(missingSend?.status).not.toBe('sent');
+
+    const throwingEmail = `${crypto.randomUUID()}@example.invalid`;
+    const throwingOwner = await makeInvitedAccount(throwingEmail);
+    const throwingBindingEnv: AuthEnv = {
+      ...authEnv,
+      EMAIL_FROM: 'noreply@devstef.nl',
+      EMAIL: { send: async () => { throw new Error('Cloudflare delivery failed'); } },
+    };
+    const throwingResponse = await handleAuth(post('/api/auth/email-otp/send-verification-otp', { email: throwingEmail, type: 'sign-in' }), throwingBindingEnv);
+    expect(throwingResponse?.status).toBe(200);
+    const throwingSend = await db.prepare(`SELECT status FROM email_sends WHERE owner_id=? ORDER BY created_at DESC LIMIT 1`)
+      .bind(throwingOwner).first<{ status: string }>();
+    expect(throwingSend?.status).toBe('unknown');
+    expect(throwingSend?.status).not.toBe('sent');
   });
 
   it('sends and consumes a one-time code, keeps the token out of JSON, and creates an active session', async () => {

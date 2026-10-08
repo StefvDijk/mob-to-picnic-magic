@@ -5,8 +5,10 @@
   "compatibility_date": "2026-10-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": false },
-  "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "RESEND_API_KEY", "EMAIL_FROM", "PICNIC_ENCRYPTION_KEY"] },
+  "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY"] },
+  "send_email": [{ "name": "EMAIL", "remote": true, "allowed_sender_addresses": ["noreply@devstef.nl"] }],
   "vars": {
+    "EMAIL_FROM": "noreply@devstef.nl",
     "APP_ENV": "development",
     "PICNIC_ENCRYPTION_KEY_VERSION": "v1",
     "APP_ORIGIN": "http://localhost:5173"
@@ -57,8 +59,10 @@
   "env": {
     "test": {
       "name": "picnic-test",
-      "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "RESEND_API_KEY", "EMAIL_FROM", "PICNIC_ENCRYPTION_KEY"] },
+      "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY"] },
+      "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@devstef.nl"] }],
       "vars": {
+        "EMAIL_FROM": "noreply@devstef.nl",
         "APP_ENV": "test",
         "PICNIC_ENCRYPTION_KEY_VERSION": "v1",
         "APP_ORIGIN": "http://localhost:5173"
@@ -82,8 +86,10 @@
     },
     "production": {
       "name": "picnic-production",
-      "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "RESEND_API_KEY", "EMAIL_FROM", "PICNIC_ENCRYPTION_KEY"] },
+      "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY"] },
+      "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@devstef.nl"] }],
       "vars": {
+        "EMAIL_FROM": "noreply@devstef.nl",
         "APP_ENV": "production",
         "PICNIC_ENCRYPTION_KEY_VERSION": "v1",
         "APP_ORIGIN": "https://picnic.devstef.nl"

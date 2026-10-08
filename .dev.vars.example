@@ -12,5 +12,4 @@ PICNIC_ENCRYPTION_KEY=""
 
 # Real email sending also requires a verified sender domain. Leave empty for
 # tests with an explicitly injected local email provider; no automatic fallback.
-RESEND_API_KEY=""
-EMAIL_FROM=""
+# Inlogmail gebruikt de Cloudflare EMAIL-binding; afzender staat in wrangler.jsonc.
