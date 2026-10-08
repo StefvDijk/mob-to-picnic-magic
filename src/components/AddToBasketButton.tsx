@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ShoppingCart, Check, AlertCircle } from 'lucide-react';
-import { Recipe } from '@/services/recipeService';
+import type { Recipe } from '@/types/recipe';
 import { picnicService } from '@/services/picnicService';
 import { backendService } from '@/services/backendService';
 import { useToast } from '@/hooks/use-toast';

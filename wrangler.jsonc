@@ -1,0 +1,106 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "picnic",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": false },
+  "vars": {
+    "APP_ENV": "development",
+    "APP_ORIGIN": "http://localhost:5173"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "picnic-local"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "picnic-uploads-local"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "IMPORT_QUEUE", "queue": "picnic-imports-local" },
+      { "binding": "ADD_QUEUE", "queue": "picnic-additions-local" }
+    ],
+    "consumers": [
+      {
+        "queue": "picnic-imports-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      },
+      {
+        "queue": "picnic-additions-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["* * * * *", "0 * * * *"]
+  },
+  "env": {
+    "test": {
+      "name": "picnic-test",
+      "vars": {
+        "APP_ENV": "test",
+        "APP_ORIGIN": "http://localhost:5173"
+      },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "picnic-test" }
+      ],
+      "r2_buckets": [
+        { "binding": "UPLOADS", "bucket_name": "picnic-uploads-test" }
+      ],
+      "queues": {
+        "producers": [
+          { "binding": "IMPORT_QUEUE", "queue": "picnic-imports-test" },
+          { "binding": "ADD_QUEUE", "queue": "picnic-additions-test" }
+        ],
+        "consumers": [
+          { "queue": "picnic-imports-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          { "queue": "picnic-additions-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
+        ]
+      }
+    },
+    "production": {
+      "name": "picnic-production",
+      "vars": {
+        "APP_ENV": "production",
+        "APP_ORIGIN": "https://picnic.devstef.nl"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "picnic-production",
+          // Replace this sentinel only after manually provisioning the production database in the EU.
+          "database_id": "REPLACE_WITH_PROVISIONED_D1_ID"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "UPLOADS", "bucket_name": "picnic-uploads-production" }
+      ],
+      "queues": {
+        "producers": [
+          { "binding": "IMPORT_QUEUE", "queue": "picnic-imports-production" },
+          { "binding": "ADD_QUEUE", "queue": "picnic-additions-production" }
+        ],
+        "consumers": [
+          { "queue": "picnic-imports-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          { "queue": "picnic-additions-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
+        ]
+      }
+    }
+  }
+}
