@@ -111,6 +111,14 @@ describe('invite-only Better Auth over D1', () => {
     expect(verification?.value).toBeTruthy();
     expect(verification?.value).not.toContain(otp);
 
+    const invalidCode = await handleAuth(post('/api/auth/sign-in/email-otp', {
+      email, otp: otp === '000000' ? '111111' : '000000',
+    }), authEnv, deps.value);
+    expect(invalidCode.ok).toBe(false);
+    expect(await invalidCode.json()).toEqual({ error: {
+      code: 'AUTH_FAILED', message: 'De code is ongeldig of verlopen. Vraag zo nodig een nieuwe code aan.',
+    } });
+
     const signInResponse = await handleAuth(post('/api/auth/sign-in/email-otp', { email, otp }), authEnv, deps.value);
     expect(signInResponse?.status).toBe(200);
     const signInBody = await signInResponse?.text();

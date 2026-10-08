@@ -86,6 +86,9 @@ describe('account HTTP routes with real Better Auth and D1', () => {
     expect(concurrentSwitches.map(result => result?.status)).toEqual([200, 200]);
     expect(await db.prepare(`SELECT ai_enabled AS aiEnabled,add_enabled AS addEnabled FROM app_switches WHERE singleton=1`).first())
       .toEqual({ aiEnabled: 0, addEnabled: 0 });
+    const overview = await handleAccounts(request('/api/admin/overview', 'GET', undefined, adminCookie), testEnv);
+    expect(overview.status).toBe(200);
+    expect((await overview.json() as { switches: unknown }).switches).toEqual({ aiEnabled: false, addEnabled: false });
     await handleAccounts(request('/api/admin/switches', 'PATCH', { aiEnabled: true, addEnabled: true }, adminCookie), testEnv);
 
     const email = `${crypto.randomUUID()}@example.invalid`;

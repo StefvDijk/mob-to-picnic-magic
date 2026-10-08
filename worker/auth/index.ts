@@ -304,6 +304,16 @@ export async function handleAuth(request: Request, env: AuthEnv, deps: AuthDepen
     const auth = createAuth(env, deps);
     const response = await auth.handler(request);
     if (isOtpSend) return jsonResponse(NEUTRAL);
+    if (!response.ok) {
+      const unavailable = response.status >= 500;
+      const limited = response.status === 429;
+      return jsonResponse({ error: {
+        code: unavailable ? 'AUTH_UNAVAILABLE' : limited ? 'AUTH_RATE_LIMITED' : 'AUTH_FAILED',
+        message: unavailable ? 'Inloggen is tijdelijk niet beschikbaar.'
+          : limited ? 'Je hebt te veel pogingen gedaan. Wacht even en probeer opnieuw.'
+          : 'De code is ongeldig of verlopen. Vraag zo nodig een nieuwe code aan.',
+      } }, response.status, response.headers);
+    }
     if (!response.headers.get('content-type')?.includes('application/json')) return noStore(response);
     let body: unknown;
     try { body = await response.clone().json(); } catch { return noStore(response); }

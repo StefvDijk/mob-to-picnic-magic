@@ -117,7 +117,7 @@ async function overview(env: AuthEnv): Promise<Response> {
   const month = budgetMonthAmsterdam(now);
   const utcDay = new Date(now).toISOString().slice(0, 10);
   const utcMonth = utcDay.slice(0, 7);
-  const [accounts, invitations, spend, emails] = await Promise.all([
+  const [accounts, invitations, spend, emails, switches] = await Promise.all([
     env.DB.prepare(`SELECT id,email,role,status,created_at AS createdAt,updated_at AS updatedAt
       FROM app_accounts ORDER BY created_at LIMIT 20`).all(),
     env.DB.prepare(`SELECT id,email,status,created_at AS createdAt,expires_at AS expiresAt
@@ -126,8 +126,11 @@ async function overview(env: AuthEnv): Promise<Response> {
       FROM app_budget_months WHERE month=?`).bind(month).first(),
     env.DB.prepare(`SELECT period,cap_count AS capCount,sent_count AS sentCount,reserved_count AS reservedCount
       FROM email_send_usage WHERE period IN (?,?)`).bind(utcDay, utcMonth).all(),
+    env.DB.prepare(`SELECT ai_enabled AS aiEnabled,add_enabled AS addEnabled FROM app_switches WHERE singleton=1`)
+      .first<{ aiEnabled: number; addEnabled: number }>(),
   ]);
   return json({ accounts: accounts.results, invitations: invitations.results,
+    switches: { aiEnabled: switches?.aiEnabled === 1, addEnabled: switches?.addEnabled === 1 },
     usage: { month, ai: spend ?? { capCents: 1500, spentCents: 0, reservedCents: 0 }, email: emails.results },
     errors: [] });
 }
