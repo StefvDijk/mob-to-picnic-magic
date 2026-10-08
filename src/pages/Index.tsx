@@ -1,142 +1,78 @@
-import React, { useState } from 'react';
-// import { RecipeInput } from '@/components/RecipeInput';
-import { PicnicLogin } from '@/components/PicnicLogin';
-import { RecipeCard } from '@/components/RecipeCard';
-import { AddToBasketButton } from '@/components/AddToBasketButton';
-import { UnmatchedMapper } from '@/components/UnmatchedMapper';
-import { Recipe } from '@/types/recipe';
-import { picnicService, PicnicCredentials } from '@/services/picnicService';
-import { useToast } from '@/hooks/use-toast';
-import { Button } from '@/components/ui/button';
-import { LogOut, Utensils, ShoppingBag } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BookOpenText, Settings2, UserRound } from 'lucide-react';
+import { api, ApiError, type MeDto } from '@/lib/api';
 import { AuthPanel } from '@/components/AuthPanel';
-import { backendService } from '@/services/backendService';
-import { PicnicCredentialsPanel } from '@/components/PicnicCredentialsPanel';
-import { IngredientInput } from '@/components/IngredientInput';
+import { AccountPanel } from '@/components/AccountPanel';
+import { AdminPanel } from '@/components/AdminPanel';
+import { RecipeWorkspace } from '@/components/RecipeWorkspace';
 
-const Index = () => {
-  const [recipe, setRecipe] = useState<Recipe | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(backendService.isLoggedIn());
-  const [isLoadingRecipe, setIsLoadingRecipe] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const { toast } = useToast();
-  const [unmatched, setUnmatched] = useState<string[]>([])
+type Section = 'recipes' | 'account' | 'admin';
 
-  const handleParsed = (ings: { name: string; quantity?: string; unit?: string }[]) => {
-    const r: Recipe = {
-      title: 'Jouw ingrediënten',
-      description: 'Geparste ingrediëntenlijst',
-      ingredients: ings,
-      instructions: []
-    };
-    setRecipe(r);
-    toast({ title: 'Ingrediënten geparst', description: `${ings.length} items gevonden` });
-  };
+export default function Index() {
+  const [me, setMe] = useState<MeDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [section, setSection] = useState<Section>('recipes');
+  const lastOwner = useRef<string | null>(null);
 
-  const handlePicnicLogin = async (_credentials: PicnicCredentials) => {
-    // Deprecated: login is now via backend stored credentials panel
-    toast({ title: 'Gebruik het Picnic-koppel formulier hierboven', variant: 'destructive' });
-  };
+  const refreshMe = useCallback(async () => {
+    setError('');
+    try {
+      const next = await api.me();
+      if (lastOwner.current && lastOwner.current !== next.account.id) {
+        sessionStorage.removeItem(`picnic:recipe-draft:${lastOwner.current}`);
+      }
+      lastOwner.current = next.account.id;
+      setMe(next);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) {
+        setMe(null);
+      } else {
+        setError(cause instanceof Error ? cause.message : 'De app kon niet worden geladen.');
+      }
+    } finally { setLoading(false); }
+  }, []);
 
-  const handleLogout = () => {
-    picnicService.logout();
-    backendService.logout();
-    setIsLoggedIn(false);
-    setRecipe(null);
-    setUnmatched([])
-    toast({
-      title: 'Uitgelogd',
-      description: 'Je bent uitgelogd bij Picnic',
-    });
-  };
+  useEffect(() => {
+    if (window.location.pathname === '/invite') {
+      // Invitation tokens are only entry links; the server binds access to the email code.
+      window.history.replaceState(null, '', '/');
+    }
+    void refreshMe();
+  }, [refreshMe]);
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Utensils className="w-8 h-8 text-picnic-orange" />
-                <ShoppingBag className="w-8 h-8 text-picnic-green" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold bg-gradient-primary bg-clip-text text-transparent">Ingredienten → Picnic</h1>
-                <p className="text-sm text-muted-foreground">
-                  Plak je ingrediënten en zet ze direct in je winkelmandje
-                </p>
-              </div>
-            </div>
-            
-            {isLoggedIn && (
-              <Button variant="outline" onClick={handleLogout}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Uitloggen
-              </Button>
-            )}
-          </div>
-        </div>
-      </header>
+  function signedOut() {
+    if (lastOwner.current) sessionStorage.removeItem(`picnic:recipe-draft:${lastOwner.current}`);
+    lastOwner.current = null;
+    setMe(null);
+    setError('');
+    setSection('recipes');
+  }
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="max-w-2xl mx-auto space-y-8">
-          
-          {/* App Auth */}
-          {!isLoggedIn && (
-            <AuthPanel onAuthenticated={() => setIsLoggedIn(true)} />
-          )}
+  if (loading) return <main className="loading-screen" aria-live="polite"><p>Je recepten laden…</p></main>;
 
-          {/* Picnic Credentials Setup */}
-          {isLoggedIn && (
-            <PicnicCredentialsPanel onConfigured={() => {}} />
-          )}
+  if (error && !me && !lastOwner.current) return <main className="auth-layout"><div className="auth-card" role="alert"><h1>Verbinding mislukt</h1><p>{error}</p><button className="text-button" onClick={() => void refreshMe()}>Opnieuw proberen</button></div></main>;
 
-          {/* Ingredient free-form input */}
-          <IngredientInput onParsed={handleParsed} />
-          
-          {/* Picnic Login (vervangen door credentials panel) */}
-          
-          {/* Recipe Display */}
-          {recipe && (
-            <div className="space-y-6">
-              <RecipeCard recipe={recipe} />
-              
-              {isLoggedIn && (
-                <AddToBasketButton recipe={recipe} onFailed={(f) => setUnmatched(f)} />
-              )}
-              
-              {isLoggedIn && unmatched.length > 0 && (
-                <UnmatchedMapper unmatched={unmatched} onSaved={() => { /* noop: user can retry add afterwards */ }} />
-              )}
+  if (!me) return <main className="auth-layout">{error && <p className="notice" role="status">{error}</p>}<AuthPanel onAuthenticated={refreshMe} /></main>;
 
-              {!isLoggedIn && recipe && (
-                <div className="text-center p-6 bg-muted/30 rounded-lg border-2 border-dashed border-muted">
-                  <p className="text-muted-foreground mb-4">
-                    Log in bij Picnic om ingrediënten toe te voegen aan je winkelmandje
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-          
-          {/* Status Display */}
-          {isLoggedIn && !recipe && (
-            <div className="text-center p-8 bg-picnic-light-green/20 rounded-lg border border-picnic-green/20">
-              <div className="flex items-center justify-center gap-2 text-picnic-green mb-2">
-                <ShoppingBag className="w-6 h-6" />
-                <span className="font-semibold">Plak je ingrediënten en parse ze!</span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Plak een lijst ingrediënten in het veld hierboven om te beginnen
-              </p>
-            </div>
-          )}
-        </div>
+  return <div className="app-shell">
+    <a className="skip-link" href="#main-content">Ga naar inhoud</a>
+    <header className="site-header">
+      <div className="site-header-inner"><div className="brand"><span className="brand-mark" aria-hidden="true">●</span><span>Mijn recepten</span></div>
+        <span className="pilot-pill">{me.environment === 'production' ? 'Pilot' : me.environment === 'test' ? 'Testomgeving' : 'Ontwikkeling'}</span></div>
+    </header>
+    <div className="app-grid">
+      <nav className="app-nav" aria-label="Hoofdnavigatie">
+        <button type="button" aria-current={section === 'recipes' ? 'page' : undefined} onClick={() => setSection('recipes')}><BookOpenText aria-hidden="true" />Mijn recepten</button>
+        <button type="button" aria-current={section === 'account' ? 'page' : undefined} onClick={() => setSection('account')}><UserRound aria-hidden="true" />Account</button>
+        {me.account.role === 'admin' && <button type="button" aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}><Settings2 aria-hidden="true" />Beheer</button>}
+      </nav>
+      <main id="main-content" className="main-content" tabIndex={-1}>
+        {error && <p className="error-message" role="alert">{error}</p>}
+        {section === 'recipes' && <RecipeWorkspace me={me} onAuthExpired={() => { setMe(null); setError('Je sessie is verlopen. Log opnieuw in om verder te gaan. Je concept blijft op dit apparaat bewaard.'); }} />}
+        {section === 'account' && <AccountPanel me={me} onRefresh={refreshMe} onSignedOut={signedOut} />}
+        {section === 'admin' && me.account.role === 'admin' && <AdminPanel me={me} onRefreshMe={refreshMe} />}
       </main>
     </div>
-  );
-};
-
-export default Index;
+  </div>;
+}

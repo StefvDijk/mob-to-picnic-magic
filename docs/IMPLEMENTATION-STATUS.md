@@ -12,9 +12,9 @@ De directeur integreert, bewaakt scope en voert de eindcontrole uit. Vakmanagers
 | Databasemanager | D1-schema, tenantrelaties, transacties, budgetten en verwijdering | Basis goedgekeurd na 9 D1-tests; directeur heeft deze en 2 infrastructuurtests herhaald |
 | Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Hoeveelheden, recepten en pure selectie goedgekeurd en aangesloten; adapters/imports/uitvoering volgen |
 | Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Eerste implementatie en API-aansluiting gecontroleerd door manager en directeur; 9 gerichte tests groen |
-| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Account-/beheerschermen gebouwd; goedkope uitvoerder bouwt receptschermen; managerreview volgt |
-| Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Onafhankelijke review van actuele backend en dependencies gestart |
-| Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Gepland |
+| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Eerste account-/recept-/beheerschermen beoordeeld; directeur heeft mobiele browserflow getest; Picnic/import volgen |
+| Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Eerste onafhankelijke review vastgelegd; verwijder- en schrijfraces blijven open |
+| Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Ontwerpt duurzame opruiming en retentie; goedkope uitvoerder volgt na huidige Picnic-ronde |
 | Kwaliteitsmanager | Integratietests, foutinjectie en acceptatiematrix | Gepland |
 | Directeur | Integratie en definitieve controle tegen alle eisen | Actief |
 
@@ -85,3 +85,13 @@ Receptbewerkingen gebruiken een verwachte versie en unieke schrijftoken binnen Ã
 De directeur heeft na aansluiten de volledige huidige Workers-suite uitgevoerd: **36/36 tests geslaagd in 9 bestanden**, plus Worker-typechecking en diffcontrole. Daarna is receptopslag expliciet via de hoofdhandler herhaald: beide recepttests slagen. Dit bewijst nog geen werkende Picnic-koppeling, importverwerking, queueconsumer, fysieke bronverwijdering of volledige browserflow.
 
 Open detail voor de komende opslag-/privacyronde: als een receptbewerking een bron loskoppelt, moet de opruimflow ook die verweesde bron vinden. Receptverwijdering maakt al een outboxopdracht; de daadwerkelijke R2-opruimer wordt nog gebouwd.
+
+### Eerste browserflow en aanvullende sessiefix
+
+De frontendmanager en Luna-uitvoerder hebben de oude aangesloten prototypeflow vervangen door echte account-, recept- en beheerpagina's. De manager corrigeerde onder meer conceptbehoud en versieconflicten. De directeur herhaalde frontend-typechecking en productiebuild en controleerde de browser met een fictief account in uitsluitend lokale D1. De testcode was een tijdelijke lokale fixture; er is geen e-mail verzonden en geen publieke ontwikkellogin ingebouwd.
+
+Browserbewijs: e-mailcodescherm en focus, inloggen, recept met `1/3 kg` bewaren, terugvinden na herladen, exact teruglezen, concept met `2/3 kg` herstellen na herladen, vervolgens een gelijktijdige databasewijziging detecteren als versieconflict zonder het eigen concept kwijt te raken. Vergelijken toont de actuele inhoud naast het behouden concept. Account, beheer en uitloggen zijn gecontroleerd. De directeur herstelde navigatie-overflow, maakte de ontwikkelomgeving zichtbaar en verbeterde knopcontrast/aanraakruimte. De gecontroleerde indeling heeft geen horizontale overflow op 320 pixels. Dit is nog geen volledige schermlezer- of eindacceptatieproef.
+
+De browserproef leidde tot een echte datumcorrectie: Better Auth bewaart native datums als ISO-tekst, terwijl enkele eigen SQL-guards epochmilliseconden verwachtten. De accountmanager heeft de helpers en goedkeurings-/verzendtriggers gecorrigeerd in `0006`; native uitnodigingsdatums zijn ook aangepast. De directeur las de fix en herhaalde auth/database/accounts: **16/16 geslaagd**, inclusief een echte OTP-login met exact genormaliseerde vervaldatum. Het accountscherm toont nu een geldige einddatum.
+
+De [beveiligingsreview](reviews/SECURITY.md) beschrijft resterende P1/P2-punten. Er is nog geen toelating voor productie of pilot. De Picnic-manager bouwt nu versleutelde koppeling en alleen-lezen product-/mandroutes; de privacymanager bereidt fysieke opruiming en retentie voor.
