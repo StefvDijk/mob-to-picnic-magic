@@ -51,9 +51,11 @@ Open kwaliteitswerk: bestaande lintfouten in vijf bron/configlocaties en 36 door
 
 ### Accountonderzoek — nog geen implementatieakkoord
 
-De accountmanager controleerde de werkelijk geïnstalleerde Better Auth-code. Een onbekend codeverzoek kan vóór de gebruikerscontrole een verificatierij schrijven; daarom komt de adres-/uitnodigingscontrole vóór de bibliotheekhandler. Authantwoorden kunnen sessietokens bevatten en worden voor de browser gesaneerd. Slechts benodigde OTP-/sessieroutes worden toegelaten. Absolute en inactieve sessiegrenzen vereisen eigen metadata naast Better Auth. De directeur heeft het native databaseschema uit de geïnstalleerde 1.7.7-code uitgelezen als invoer voor de databasemanager.
+De accountmanager controleerde de werkelijk geïnstalleerde Better Auth-code. Een onbekend codeverzoek kan vóór de gebruikerscontrole een verificatierij schrijven; daarom komt de adres-/uitnodigingscontrole vóór de bibliotheekhandler. Authenticatieantwoorden kunnen sessietokens bevatten en worden voor de browser gesaneerd. Slechts benodigde OTP-/sessieroutes worden toegelaten. Absolute en inactieve sessiegrenzen vereisen eigen metadata naast Better Auth. De directeur heeft het native databaseschema uit de geïnstalleerde 1.7.7-code uitgelezen als invoer voor de databasemanager.
 
 
 ## Externe toelatingspunten
 
 Echte Picnic-authenticatie/SMS en productdata, CPU-meting op de echte Workers Free-runtime, e-maildomein en benodigde leverancierssecrets, en beoordeling van Picnic-toegang blijven afzonderlijk te bewijzen. Lokale ontwikkeling en tests kunnen intussen doorgaan. Er worden geen betaalde abonnementen of echte boodschappen stil geactiveerd.
+
+Eerste vastgelegde bouwstap: commit `3249c05` op `codex/picnic-mvp`, met specificaties en lokaal gecontroleerde infrastructuur. De oorspronkelijke servicewijziging is niet in die commit meegenomen.

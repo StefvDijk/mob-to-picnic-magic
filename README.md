@@ -1,73 +1,57 @@
-# Welcome to your Lovable project
+# Picnic receptenapp
 
-## Project info
+Een besloten, Nederlandstalige webapp om recepten te bewaren, passende boodschappen te controleren en na goedkeuring toe te voegen aan je eigen Picnic-mandje.
 
-**URL**: https://lovable.dev/projects/0106f53d-fe74-4657-8d53-1987e55451f0
+De MVP wordt gebouwd volgens het goedgekeurde [bouwplan](docs/BOUWPLAN.md). De actuele implementatie, testresultaten en resterende toelatingspunten staan in [implementatiestatus](docs/IMPLEMENTATION-STATUS.md). De lokale Workers-basis werkt; de volledige nieuwe gebruikersflow is nog in aanbouw.
 
-## How can I edit this code?
+## Lokaal ontwikkelen
 
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/0106f53d-fe74-4657-8d53-1987e55451f0) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Gebruik Node.js 24 en npm. Installeer de vastgelegde dependencies en bouw eerst de statische bestanden:
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+npm ci
+npm run build
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Start daarna in twee terminals:
 
-# Step 3: Install the necessary dependencies.
-npm i
+```sh
+npm run dev:worker
+```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+De website draait op `http://localhost:5173`; `/api` wordt zonder padwijziging doorgestuurd naar de lokale Worker op poort 8787. `GET /api/health` geeft een minimale status. D1, R2 en queuebindings worden lokaal nagebootst. De oorspronkelijke frontend wordt tijdens de bouw vervangen; een geslaagde healthcheck betekent nog niet dat alle recept- en accountfuncties klaar zijn.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Workers-scripts laden de oude root-`.env` bewust niet automatisch. Gebruik uitsluitend lokale, genegeerde `.dev.vars` voor ontwikkelgeheimen zodra de betreffende integratie is ingericht. Zet geen Picnic-, AI-, e-mail- of authenticatiegeheimen in `VITE_*`: die variabelen kunnen in de browserbundel terechtkomen.
 
-**Use GitHub Codespaces**
+## Controles
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+npm run types:worker
+npm run typecheck:worker
+npx tsc -p tsconfig.app.json --noEmit
+npm run test:worker
+npm run build
+```
 
-## What technologies are used for this project?
+De Workers-tests hebben lokale netwerkpoorten nodig. Ze gebruiken geen echte Picnic-accountgegevens. De eerste smoke-tests toetsen opslagbindings en een nagebootst Picnic-loginantwoord; echte queueafhandeling en de volledige acceptatiematrix volgen met hun implementatie.
 
-This project is built with:
+`npm run lint` en `npm audit` worden ook beoordeeld. Er zijn nog bekende bestaande lintfouten en dependency-advisories; zie het [bewijsregister](docs/IMPLEMENTATION-STATUS.md) en de [dependency-nulmeting](docs/reviews/DEPENDENCIES.md).
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Structuur
 
-## How can I deploy this project?
+- `src/`: React-interface, in migratie vanaf het oorspronkelijke prototype.
+- `worker/`: nieuwe Cloudflare-backend, domeinlogica, adapters en duurzame verwerking.
+- `migrations/`: D1-schema en migraties zodra de databasefase is opgenomen.
+- `shared/`: browserveilige contracten tussen frontend en backend.
+- `test/`: lokale Workers-proeven; domeintests staan ook bij de betreffende modules.
+- `docs/`: productafspraken, ontwerp, uitvoering en beoordelingen.
 
-Simply open [Lovable](https://lovable.dev/projects/0106f53d-fe74-4657-8d53-1987e55451f0) and click on Share -> Publish.
+De oude Express-server in `server/` is historisch prototypewerk en niet de nieuwe pilotbackend. De tijdelijke dependencies `picnic-api` 3.1.3 en `picnic-api-worker` 4.10.0 houden bestaande broncode en nieuwe backend gescheiden tijdens de migratie. De nieuwe interface mag geen Picnic-client of Picnic-geheimen bevatten.
 
-## Can I connect a custom domain to my Lovable project?
+## Uitrollen
 
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Er is nog niets uitgerold. De productieconfig heeft bewust nog geen bruikbare D1-resource-ID. Echte resources, geheimen, e-maildomein, runtimegrenzen, verwijderproef en beperkte Picnic-eindtest moeten eerst zijn ingericht en gecontroleerd. Een lokale mocktest is geen bewijs van een werkende productie-integratie.

@@ -1,10 +1,10 @@
 # Picnic projectstatus en vervolgplan
 
-Hersteld op 7 oktober 2026, bijgewerkt op 8 oktober 2026. De specificatie en het [samenhangende bouwplan](BOUWPLAN.md) zijn opgesteld: productselectie, accounts, betrouwbaar toevoegen, datamodel, import, budgetbewaking en infrastructuur. Het bronnenonderzoek is afgerond voor deze ontwerpkeuze. De eerste uitvoeringsfase bestaat uit technische toelatingsproeven; de nieuwe app is nog niet gebouwd en de integraties zijn nog niet in de gekozen runtime getest. Het plan is opgesteld door Codex op basis van bevestigde afspraken en gedelegeerde ontwerpkeuzes, niet als geheel opnieuw door de gebruiker goedgekeurd.
+Hersteld op 7 oktober 2026, bijgewerkt op 8 oktober 2026. De gebruiker heeft het [bouwplan](BOUWPLAN.md) goedgekeurd en opdracht gegeven een eerste MVP te bouwen met managers en goedkopere uitvoerders. De bouw is gestart op `codex/picnic-mvp`; actuele voortgang en testbewijs staan in [implementatiestatus](IMPLEMENTATION-STATUS.md). De eerste lokale Workers-basis is gebouwd en gecontroleerd. De volledige app en externe toelatingsproeven zijn nog niet afgerond.
 
 ## Werkwijze vanaf 8 oktober
 
-De gebruiker wil niet over ieder detail worden bevraagd. Codex kiest reguliere, omkeerbare ontwerpdetails zelfstandig, legt de reden en status vast en bewaakt de eerder bevestigde afspraken. Alleen wezenlijke keuzes over productrichting, kosten of ingrijpende gevolgen worden voorgelegd. Een door Codex gekozen standaard wordt niet ten onrechte als expliciet gebruikersbesluit gepresenteerd. De afspraak om eerst te specificeren blijft gelden; dit is geen opdracht om nu de app te bouwen of uit te rollen.
+De gebruiker wil niet over ieder detail worden bevraagd. Codex kiest reguliere, omkeerbare ontwerpdetails zelfstandig, legt de reden en status vast en bewaakt de eerder bevestigde afspraken. Alleen wezenlijke keuzes over productrichting, kosten of ingrijpende gevolgen worden voorgelegd. Een door Codex gekozen standaard wordt niet ten onrechte als expliciet gebruikersbesluit gepresenteerd. Na voltooiing van de specificatie heeft de gebruiker expliciet opdracht gegeven de MVP te bouwen. Gewone implementatiekeuzes worden zelfstandig uitgevoerd; een oud document met de eerdere specificatiegrens mag die nieuwe opdracht niet blokkeren. Betaalde abonnementen en echte externe boodschappen worden niet stil geactiveerd.
 
 ## Bron en dekking
 
@@ -89,9 +89,9 @@ Herkomst blijft per gegeven herkenbaar: screenshot, pagina of gebruikerscorrecti
 - Acht kippendijen niet zonder onderbouwing omrekenen naar een verpakking in gram.
 - Globale of ontbrekende hoeveelheden vereisen een gemarkeerd voorstel en bewuste keuze.
 
-## Werkelijke staat van de code
+## Historische uitgangsstaat van de code vóór de MVP-bouw
 
-De lokale hoofdbranch staat op `79e121f` van 17 september 2025. Het is een prototype met React/Vite en een Express-backend. De backend kiest bij zoeken het eerste resultaat en voegt één verpakking toe. Gebruikers staan in werkgeheugen; Picnic-wachtwoorden worden met een eenvoudige XOR-bewerking bewaard. Dit voldoet niet aan het besproken ontwerp voor meerdere gebruikers.
+De uitgangscommit van de hoofdbranch is `79e121f` van 17 september 2025. Het nieuwe werk gebeurt op `codex/picnic-mvp`; onderstaande beschrijving betreft het oorspronkelijke prototype. Het is een prototype met React/Vite en een Express-backend. De backend kiest bij zoeken het eerste resultaat en voegt één verpakking toe. Gebruikers staan in werkgeheugen; Picnic-wachtwoorden worden met een eenvoudige XOR-bewerking bewaard. Dit voldoet niet aan het besproken ontwerp voor meerdere gebruikers.
 
 In `src/services/picnicService.ts` staat een al bestaande, ongecommitteerde `buildUrl`-wijziging. De hoofdbranch gebruikt een andere backendservice en heeft niet de routes `/api/login` en `/api/match-session` waarvoor die oude opdracht bedoeld was.
 
@@ -110,6 +110,6 @@ Beide hervattingstaken zijn inmiddels afgerond. De eerste rapporteert een geslaa
 7. **Privacy en toegang:** leveranciersretentie en toelaatbaarheid van de Picnic-integratie blijven toelatingspunten vóór de vriendenpilot. Verwijdering en herstel worden daadwerkelijk beproefd. Er is geen nieuwe juridische conclusie of toestemming van Picnic verkregen.
 8. **Bouwvolgorde:** het [bouwplan](BOUWPLAN.md) bevat schermen, zes fasen en de acceptatiematrix. Fase 0 bewijst de risicovolle technische aannames; daarna volgen account/recept, import, productvoorstel, gecontroleerd toevoegen en de pilot.
 
-## Validatie van deze oplevering
+## Validatie van de eerdere specificatieoplevering
 
 De ontwerpdocumenten zijn op onderlinge consistentie, lokale verwijzingen en witruimte gecontroleerd. Een afzonderlijke review van authenticatie, datamodel en budgetregels leverde een verschil in de formulering van het gebruikersmaximum op; dit is gelijkgetrokken op de gekozen pilotstandaard van tien accounts inclusief Stef. Er zijn geen nieuwe applicatietests uitgevoerd, omdat deze oplevering uitsluitend specificaties wijzigt. De al bestaande wijziging in `src/services/picnicService.ts` is behouden.
