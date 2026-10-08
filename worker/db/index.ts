@@ -286,21 +286,23 @@ export async function getOwnedRecipe(db: Db, ownerId: string, recipeId: string) 
     FROM recipes WHERE owner_id=? AND id=? AND deleted_at IS NULL`).bind(ownerId, recipeId).first();
 }
 
-/** Final DB purge after the durable deletion task has removed referenced R2 objects. */
-export async function purgeAccountData(db: Db, ownerId: string, now = Date.now()): Promise<void> {
+/** Final DB purge only after the current deletion lease has verified R2 cleanup. */
+export async function purgeAccountData(db: Db, ownerId: string, now: number, leaseToken: string): Promise<void> {
   const account = await db.prepare(`SELECT email,status FROM app_accounts WHERE id=?`).bind(ownerId).first<{ email: string; status: string }>();
   if (!account) return;
   if (account.status !== 'deleting') throw new Error('account purge requires deleting status');
-  const task = await db.prepare(`SELECT id FROM deletion_tasks WHERE owner_id=? AND status='running'`).bind(ownerId).first();
-  if (!task) throw new Error('account purge requires a running deletion task with object references already captured');
+  const task = await db.prepare(`SELECT id FROM deletion_tasks WHERE owner_id=? AND status='running'
+    AND lease_token=? AND lease_expires_at>? AND r2_verified_at IS NOT NULL`)
+    .bind(ownerId, leaseToken, now).first();
+  if (!task) throw new Error('account purge requires verified R2 cleanup and a live deletion lease');
+  const remaining = await db.prepare(`SELECT 1 FROM uploads WHERE owner_id=? AND status!='deleted' LIMIT 1`)
+    .bind(ownerId).first();
+  if (remaining) throw new Error('account purge requires every upload to be deleted');
   await db.batch([
-    // Unknown AI work remains charged to the app-wide month even after user details are erased.
-    db.prepare(`UPDATE budget_reservations SET state='unknown' WHERE owner_id=? AND state='reserved'`).bind(ownerId),
-    db.prepare(`UPDATE app_budget_months SET
-      reserved_cents=reserved_cents-(SELECT COALESCE(SUM(cap_cents),0) FROM budget_reservations b WHERE b.owner_id=? AND b.month=app_budget_months.month AND b.state IN ('reserved','unknown')),
-      spent_cents=spent_cents+(SELECT COALESCE(SUM(cap_cents),0) FROM budget_reservations b WHERE b.owner_id=? AND b.month=app_budget_months.month AND b.state IN ('reserved','unknown'))
-      WHERE EXISTS (SELECT 1 FROM budget_reservations b WHERE b.owner_id=? AND b.month=app_budget_months.month AND b.state IN ('reserved','unknown'))`)
-      .bind(ownerId, ownerId, ownerId),
+    db.prepare(`INSERT INTO account_purge_guards(owner_id,lease_token,checked_at) VALUES(?,?,?)`)
+      .bind(ownerId, leaseToken, now),
+    // The migration's delete trigger keeps unresolved AI attempts charged to
+    // app-wide totals when their import or account-owned detail is removed.
     db.prepare(`DELETE FROM execution_lines WHERE owner_id=?`).bind(ownerId),
     db.prepare(`DELETE FROM connection_execution_claims WHERE owner_id=?`).bind(ownerId),
     db.prepare(`DELETE FROM actions WHERE owner_id=?`).bind(ownerId),
@@ -331,7 +333,11 @@ export async function purgeAccountData(db: Db, ownerId: string, now = Date.now()
     db.prepare(`DELETE FROM budget_reservations WHERE owner_id=?`).bind(ownerId),
     db.prepare(`DELETE FROM app_accounts WHERE id=?`).bind(ownerId),
     db.prepare(`DELETE FROM user WHERE id=?`).bind(ownerId),
-    db.prepare(`UPDATE deletion_tasks SET status='complete',completed_at=? WHERE owner_id=? AND status='running'`).bind(now, ownerId),
+    db.prepare(`UPDATE deletion_tasks SET status='complete',completed_at=?,lease_token=NULL,lease_expires_at=NULL,
+      object_keys_json='[]',cursor=NULL,last_error_code=NULL
+      WHERE owner_id=? AND status='running' AND lease_token=? AND lease_expires_at>? AND r2_verified_at IS NOT NULL`)
+      .bind(now, ownerId, leaseToken, now),
+    db.prepare(`DELETE FROM account_purge_guards WHERE owner_id=? AND lease_token=?`).bind(ownerId, leaseToken),
   ]);
 }
 
@@ -347,15 +353,23 @@ export async function reserveUpload(db: Db, ownerId: string, input: UploadReserv
   if (!Number.isSafeInteger(input.byteSize) || input.byteSize <= 0 || input.byteSize > 8 * 1024 * 1024) {
     throw new TypeError('upload size must be a positive safe integer no greater than 8 MiB');
   }
+  if (input.objectKey.startsWith('private/account-tombstones/')) {
+    throw new TypeError('upload object key is reserved');
+  }
   await db.batch([
     db.prepare(`INSERT INTO user_upload_usage(owner_id) VALUES(?) ON CONFLICT(owner_id) DO NOTHING`).bind(ownerId),
     db.prepare(`INSERT INTO uploads(id,owner_id,object_key,media_type,byte_size,status,created_at)
-      VALUES(?,?,?,?,?,'reserved',?)`).bind(input.id, ownerId, input.objectKey, input.mediaType, input.byteSize, input.createdAt),
+      SELECT ?,a.id,?,?,?,'reserved',? FROM app_accounts a WHERE a.id=? AND a.status='active'`)
+      .bind(input.id, input.objectKey, input.mediaType, input.byteSize, input.createdAt, ownerId),
   ]);
+  const stored = await db.prepare(`SELECT 1 FROM uploads WHERE owner_id=? AND id=? AND status='reserved'`)
+    .bind(ownerId, input.id).first();
+  if (!stored) throw new Error('upload reservation requires active account');
 }
 
 export async function markUploadStored(db: Db, ownerId: string, uploadId: string): Promise<boolean> {
-  const result = await db.prepare(`UPDATE uploads SET status='stored' WHERE owner_id=? AND id=? AND status='reserved'`)
+  const result = await db.prepare(`UPDATE uploads SET status='stored' WHERE owner_id=? AND id=? AND status='reserved'
+    AND EXISTS(SELECT 1 FROM app_accounts a WHERE a.id=uploads.owner_id AND a.status='active')`)
     .bind(ownerId, uploadId).run();
   return result.meta.changes > 0;
 }

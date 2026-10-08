@@ -16,6 +16,10 @@ const INVITATION_LIFETIME = 7 * DAY;
 const AMSTERDAM_MONTH = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit',
 });
+export interface AccountDependencies extends AuthDependencies {
+  /** Deterministic interleaving for testing invitation acceptance during revocation. */
+  beforeInvitationRevoke?: () => Promise<void>;
+}
 
 /** The AI budget rolls over at midnight in the pilot's Europe/Amsterdam timezone. */
 export function budgetMonthAmsterdam(now: number): string {
@@ -85,20 +89,23 @@ async function me(request: Request, env: AuthEnv, principal: Principal): Promise
   const access = await getSessionAccess(env.DB, principal.ownerId, principal.sessionId, now);
   if (!access.success) return fail(401, 'UNAUTHENTICATED', 'Log opnieuw in.');
   const month = budgetMonthAmsterdam(now);
-  const [connection, userBudget, appBudget] = await Promise.all([
+  const [connection, userBudget, appBudget, pendingVerification] = await Promise.all([
     env.DB.prepare(`SELECT status FROM connections WHERE owner_id=? ORDER BY updated_at DESC LIMIT 1`)
       .bind(principal.ownerId).first<{ status: string }>(),
     env.DB.prepare(`SELECT cap_cents AS capCents,spent_cents AS spentCents,reserved_cents AS reservedCents
       FROM user_budget_months WHERE owner_id=? AND month=?`).bind(principal.ownerId, month).first(),
     env.DB.prepare(`SELECT cap_cents AS capCents,spent_cents AS spentCents,reserved_cents AS reservedCents
       FROM app_budget_months WHERE month=?`).bind(month).first(),
+    env.DB.prepare(`SELECT 1 FROM picnic_pending_verifications WHERE owner_id=?
+      AND state='verification_required' AND expires_at>? AND encrypted_auth_key IS NOT NULL`)
+      .bind(principal.ownerId, now).first(),
   ]);
   return json({
     account: { id: principal.ownerId, email: principal.email, role: principal.role, status: 'active' },
     session: { authenticatedAt: access.value.authenticatedAt, lastActivityAt: access.value.lastActivityAt,
       expiresAt: Math.min(access.value.authenticatedAt + 30 * DAY, access.value.lastActivityAt + 14 * DAY, access.value.sessionExpiresAt),
       recentlyVerified: assertRecentVerification(principal) },
-    picnic: { status: connection?.status ?? 'disconnected' },
+    picnic: { status: connection?.status ?? 'disconnected', verificationRequired: !!pendingVerification },
     budgets: { month, user: userBudget ?? { capCents: 500, spentCents: 0, reservedCents: 0 },
       app: appBudget ?? { capCents: 1500, spentCents: 0, reservedCents: 0 } },
     environment: env.APP_ENV,
@@ -183,16 +190,18 @@ async function invite(request: Request, env: AuthEnv, principal: Principal, deps
   return json({ invitation: { id, email, status: 'pending', expiresAt: now + INVITATION_LIFETIME } }, 201);
 }
 
-async function revokeInvite(env: AuthEnv, invitationId: string): Promise<Response> {
+async function revokeInvite(env: AuthEnv, invitationId: string, deps: AccountDependencies): Promise<Response> {
   const invitation = await env.DB.prepare(`SELECT status FROM invitations WHERE id=?`).bind(invitationId)
     .first<{ status: string }>();
   if (!invitation) return fail(404, 'NOT_FOUND', 'Niet gevonden.');
   if (invitation.status !== 'pending') return fail(409, 'INVITATION_USED', 'Deze uitnodiging is niet meer open.');
-  await env.DB.batch([
+  await deps.beforeInvitationRevoke?.();
+  const results = await env.DB.batch([
     env.DB.prepare(`UPDATE invitations SET status='revoked' WHERE id=? AND status='pending'`).bind(invitationId),
-    env.DB.prepare(`DELETE FROM user WHERE id IN (SELECT id FROM app_accounts WHERE invitation_id=? AND status='invited')`)
-      .bind(invitationId),
+    env.DB.prepare(`DELETE FROM user WHERE id IN (SELECT id FROM app_accounts WHERE invitation_id=? AND status='invited')
+      AND EXISTS(SELECT 1 FROM invitations WHERE id=? AND status='revoked')`).bind(invitationId, invitationId),
   ]);
+  if (results[0]?.meta.changes !== 1) return fail(409, 'INVITATION_USED', 'Deze uitnodiging is niet meer open.');
   return empty();
 }
 
@@ -264,7 +273,7 @@ async function deleteAccount(request: Request, env: AuthEnv, principal: Principa
 }
 
 /** Returns null for routes owned by another module. */
-export async function handleAccounts(request: Request, env: AuthEnv, deps: AuthDependencies = {}): Promise<Response | null> {
+export async function handleAccounts(request: Request, env: AuthEnv, deps: AccountDependencies = {}): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
   const known = path === '/api/me' || path === '/api/logout' || path === '/api/logout-all' ||
@@ -289,7 +298,7 @@ export async function handleAccounts(request: Request, env: AuthEnv, deps: AuthD
     if (path === '/api/admin/invitations' && request.method === 'POST') return invite(request, env, account, deps);
     if (path === '/api/admin/switches' && request.method === 'PATCH') return changeSwitches(request, env, account);
     const inviteId = path.match(/^\/api\/admin\/invitations\/([^/]+)$/)?.[1];
-    if (inviteId && request.method === 'DELETE') return revokeInvite(env, inviteId);
+    if (inviteId && request.method === 'DELETE') return revokeInvite(env, inviteId, deps);
     const targetId = path.match(/^\/api\/admin\/accounts\/([^/]+)$/)?.[1];
     if (targetId && request.method === 'PATCH') return changeAccount(request, env, account, targetId);
   }

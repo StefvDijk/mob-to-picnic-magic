@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { type AuthDependencies, type AuthEnv } from '../auth';
 import { handleRequest as handleAuth, handleRequest as handleAccounts } from '../index';
 import { bootstrapAdmin } from '../db';
-import { budgetMonthAmsterdam } from './accounts';
+import { budgetMonthAmsterdam, handleAccounts as accountRoutes } from './accounts';
 
 const db = env.DB;
 const testEnv: AuthEnv = {
@@ -100,7 +100,11 @@ describe('account HTTP routes with real Better Auth and D1', () => {
       .bind(email).first<{ status: string; emailVerified: number }>();
     expect(invited).toEqual({ status: 'invited', emailVerified: 0 });
 
-    const memberCookie = await signIn(email);
+    let memberCookie = '';
+    const lostRevokeRace = await accountRoutes(request(`/api/admin/invitations/${invitation.id}`, 'DELETE', undefined, adminCookie), testEnv, {
+      ...deps, beforeInvitationRevoke: async () => { memberCookie = await signIn(email); },
+    });
+    expect(lostRevokeRace?.status).toBe(409);
     const memberMe = await handleAccounts(request('/api/me', 'GET', undefined, memberCookie), testEnv);
     expect(memberMe?.status).toBe(200);
 

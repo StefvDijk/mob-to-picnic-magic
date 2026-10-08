@@ -13,6 +13,9 @@ import {
   markExecutionSending,
   markStaleSendingUnknown,
   purgeAccountData,
+  reserveUpload,
+  markUploadStored,
+  markUploadDeleted,
   reserveBudget,
   releaseBudget,
   settleBudget,
@@ -156,6 +159,19 @@ describe('D1 repository invariants', () => {
     expect((usage?.userSpent ?? 0) + (usage?.userReserved ?? 0)).toBeLessThanOrEqual(1);
   });
 
+  it('conservatively books an unresolved AI attempt when its expired import is removed', async () => {
+    await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_text,status,created_at,updated_at)
+      VALUES('retention-import',?,'text','draft','failed',?,?)`).bind(aliceId, now, now).run();
+    await reserveBudget(db, aliceId, { month: '2099-04', appCapCents: 5, userCapCents: 5 },
+      { id: 'retention-budget', importId: 'retention-import', attemptId: 'retention-attempt', capCents: 5, createdAt: now });
+    await db.prepare(`DELETE FROM imports WHERE owner_id=? AND id='retention-import'`).bind(aliceId).run();
+    const totals = await db.prepare(`SELECT a.reserved_cents AS appReserved,a.spent_cents AS appSpent,
+      u.reserved_cents AS userReserved,u.spent_cents AS userSpent FROM app_budget_months a
+      JOIN user_budget_months u ON u.month=a.month AND u.owner_id=? WHERE a.month='2099-04'`)
+      .bind(aliceId).first<{ appReserved: number; appSpent: number; userReserved: number; userSpent: number }>();
+    expect(totals).toEqual({ appReserved: 0, appSpent: 5, userReserved: 0, userSpent: 5 });
+  });
+
   it('creates one approval/action, persists sending before work, and holds an unknown connection claim', async () => {
     await createConnection(aliceId, 'alice-connection');
     const { proposalId, purchaseLineId } = await createProposal(aliceId, 'alice-connection', 'proposal-one', 'line-one');
@@ -221,14 +237,45 @@ describe('D1 repository invariants', () => {
   });
 
   it('preserves the deletion cleanup task while account-owned rows are removed', async () => {
+    await expect(reserveUpload(db, bobId, { id: 'tombstone-collision',
+      objectKey: 'private/account-tombstones/bob.json', mediaType: 'image/png', byteSize: 2, createdAt: now }))
+      .rejects.toThrow('reserved');
+    await reserveUpload(db, bobId, { id: 'purge-reserved-upload', objectKey: 'bob/purge-reserved-upload',
+      mediaType: 'image/png', byteSize: 2, createdAt: now });
     await db.prepare(`UPDATE app_accounts SET status='deleting' WHERE id=?`).bind(bobId).run();
+    await expect(reserveUpload(db, bobId, { id: 'late-upload', objectKey: 'bob/late-upload',
+      mediaType: 'image/png', byteSize: 2, createdAt: now + 1 })).rejects.toThrow();
+    expect(await markUploadStored(db, bobId, 'purge-reserved-upload')).toBe(false);
+    await expect(db.prepare(`INSERT INTO uploads(id,owner_id,object_key,media_type,byte_size,status,created_at)
+      VALUES('late-direct',?,'bob/late-direct','image/png',2,'reserved',?)`).bind(bobId, now + 1).run())
+      .rejects.toThrow('upload_account_inactive');
+    await expect(db.prepare(`UPDATE uploads SET status='stored' WHERE owner_id=? AND id='purge-reserved-upload'`)
+      .bind(bobId).run()).rejects.toThrow('upload_account_inactive');
     await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_text,status,created_at,updated_at) VALUES('purge-import',?,'text','recipe','queued',?,?)`)
       .bind(bobId, now, now).run();
     await reserveBudget(db, bobId, { month: '2099-03', appCapCents: 5, userCapCents: 5 },
       { id: 'purge-budget', importId: 'purge-import', attemptId: 'purge-attempt', capCents: 5, createdAt: now });
-    await db.prepare(`INSERT INTO deletion_tasks(id,owner_id,status,object_keys_json,requested_at,delete_after)
-      VALUES('delete-bob-task',?,'running','["upload/object"]',?,?)`).bind(bobId, now, expires).run();
-    await purgeAccountData(db, bobId, now);
+    await db.prepare(`INSERT INTO deletion_tasks(id,owner_id,status,object_keys_json,requested_at,delete_after,
+      lease_token,lease_expires_at,r2_verified_at)
+      VALUES('delete-bob-task',?,'running','["upload/object"]',?,?,'bob-lease',?,?)`)
+      .bind(bobId, now, expires, expires, now).run();
+    await expect(purgeAccountData(db, bobId, now, 'wrong-lease')).rejects.toThrow();
+    await expect(purgeAccountData(db, bobId, now, 'bob-lease')).rejects.toThrow('every upload');
+    expect(await markUploadDeleted(db, bobId, 'purge-reserved-upload', now)).toBe(true);
+    const leaseStolenBeforeBatch = {
+      prepare: db.prepare.bind(db),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await db.prepare(`UPDATE deletion_tasks SET lease_token='new-owner' WHERE owner_id=?`).bind(bobId).run();
+        return db.batch(statements);
+      },
+    } as unknown as D1Database;
+    await expect(purgeAccountData(leaseStolenBeforeBatch, bobId, now, 'bob-lease'))
+      .rejects.toThrow('account_purge_lease_lost');
+    expect(await db.prepare(`SELECT id FROM imports WHERE owner_id=? AND id='purge-import'`).bind(bobId).first())
+      .not.toBeNull();
+    expect(await db.prepare(`SELECT id FROM app_accounts WHERE id=?`).bind(bobId).first()).not.toBeNull();
+    await db.prepare(`UPDATE deletion_tasks SET lease_token='bob-lease' WHERE owner_id=?`).bind(bobId).run();
+    await purgeAccountData(db, bobId, now, 'bob-lease');
     expect(await db.prepare(`SELECT id,status,completed_at FROM deletion_tasks WHERE owner_id=?`).bind(bobId).first())
       .toEqual({ id: 'delete-bob-task', status: 'complete', completed_at: now });
     expect(await db.prepare(`SELECT id FROM user WHERE id=?`).bind(bobId).first()).toBeNull();
@@ -239,9 +286,14 @@ describe('D1 repository invariants', () => {
 
   it('removes invitations created by a deleting admin without deleting invitees', async () => {
     await db.prepare(`UPDATE app_accounts SET status='deleting' WHERE id=?`).bind(adminId).run();
-    await db.prepare(`INSERT INTO deletion_tasks(id,owner_id,status,object_keys_json,requested_at,delete_after)
-      VALUES('delete-admin-task',?,'running','[]',?,?)`).bind(adminId, now, expires).run();
-    await purgeAccountData(db, adminId, now);
+    await db.prepare(`INSERT INTO deletion_tasks(id,owner_id,status,object_keys_json,requested_at,delete_after,
+      lease_token,lease_expires_at,r2_verified_at)
+      VALUES('delete-admin-task',?,'running','[]',?,?,'admin-lease',?,?)`)
+      .bind(adminId, now, expires, expires, now).run();
+    await db.prepare(`UPDATE deletion_tasks SET r2_verified_at=NULL WHERE owner_id=?`).bind(adminId).run();
+    await expect(purgeAccountData(db, adminId, now, 'admin-lease')).rejects.toThrow('verified R2');
+    await db.prepare(`UPDATE deletion_tasks SET r2_verified_at=? WHERE owner_id=?`).bind(now, adminId).run();
+    await purgeAccountData(db, adminId, now, 'admin-lease');
     expect(await db.prepare(`SELECT id FROM user WHERE id=?`).bind(adminId).first()).toBeNull();
     expect(await db.prepare(`SELECT id,status FROM app_accounts WHERE id=?`).bind(aliceId).first())
       .toEqual({ id: aliceId, status: 'active' });

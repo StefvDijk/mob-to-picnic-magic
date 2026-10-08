@@ -10,23 +10,31 @@ Beoordeeld op 8 oktober 2026: `worker/auth`, `worker/routes/accounts.ts`, `worke
 
 Remedie: maak een duurzame verwijderwerker die R2-objecten idempotent wist, de verwijdertaak bijhoudt, daarna pas `purgeAccountData` uitvoert en achterblijvers of fouten zichtbaar maakt. Test verwijdering, onderbreking en herlevering met een echte R2-testbinding.
 
+**Herbeoordeling lokale bouwstand:** `worker/jobs/maintenance.ts` verwerkt nu de D1-verwijderlijst via leases, R2-delete plus controle, her-scan van uploads en een herstel-tombstone vóór definitieve D1-purge. `worker/index.ts` roept dit vanuit de geplande trigger aan. De lokale D1/R2-tests dekken onderbreking, verlopen lease, herlevering, eigenaarsgrenzen en een restore-oefening. De codebevinding is hiermee gesloten; een live 24-uursdoel, back-uptermijn en leveranciersretentie blijven pilotgates en zijn niet door lokale tests bewezen. Zie [privacyoperaties](../PRIVACY-OPERATIONS.md).
+
 ### P1 vóór uploadactivatie — Nieuwe upload kan na accountverwijdering buiten de delete-snapshot vallen
 
 `worker/db/index.ts:340-354` reserveert en voltooit uploads zonder atomische controle op `app_accounts.status='active'`. `worker/routes/accounts.ts:252-254` legt objectkeys op één moment vast. Een lopende toekomstige upload die al geautoriseerd was, kan daarna alsnog een nieuwe `uploads`-rij en R2-object toevoegen. Die sleutel ontbreekt dan in `deletion_tasks.object_keys_json`; bij latere `purgeAccountData` verdwijnt de DB-verwijzing en blijft het object verweesd. Reproductie op D1: zet een account met de bestaande route op `deleting`, roep daarna `reserveUpload(db, ownerId, ...)` aan; de schemaquota en foreign key laten de reservering toe. Er is nu nog geen HTTP-uploadroute, dus dit is een aantoonbare race in de opslagprimitief en een releaseblokkade voor die route.
 
 Remedie: maak uploadreservering afhankelijk van een actieve accountstatus in dezelfde schrijfstap, voorkom opslag na intrekking, en laat de verwijderwerker tijdens afronding opnieuw op resterende objecten controleren. Behoud voldoende objectreferenties totdat de R2-verwijdering bevestigd is.
 
-### P2 — Uitnodiging intrekken kan ten onrechte succes melden bij gelijktijdig accepteren
+**Herbeoordeling lokale bouwstand:** migratie `0007_privacy_maintenance.sql` weigert een nieuwe uploadrij of overgang naar `stored` voor een niet-actief account; `reserveUpload` en `markUploadStored` passen dezelfde voorwaarde toe. De verwijderwerker wacht een begrensde uploadperiode, bewaart de sleutels tot R2-verwijdering bevestigd is en scant opnieuw vóór purge. D1-tests dekken helper- en directe SQL-paden; de R2-tests dekken een onvolledige snapshot en een late reservering. Bij activering van een HTTP-uploadroute moet die na elke `R2.put` de `stored`-overgang controleren en bij afwijzing de key wissen. Zonder die toekomstige routecontrole is uploadactivatie nog niet vrijgegeven.
+
+### P2 — Uitnodiging intrekken kan ten onrechte succes melden bij gelijktijdig accepteren — opgelost in lokale bouwstand
 
 `worker/routes/accounts.ts:185-195` leest eerst `pending`, doet daarna een conditionele `UPDATE`, maar controleert het aantal gewijzigde rijen niet en retourneert altijd `204`. Als OTP-verificatie de uitnodiging tussen de eerste read en de batch consumeert, zijn de `UPDATE` en de daaropvolgende `DELETE ... status='invited'` beide no-op. De beheerder krijgt toch te zien dat de uitnodiging is ingetrokken, terwijl het account actief is. De triggers in `migrations/0001_initial.sql:104-115` beschermen het eenmalige accepteren; dit is een beheerstatusrace, geen aangetoonde toegang tussen tenants.
 
 Remedie: maak de uitkomst van de conditionele statuswijziging beslissend en retourneer bij verloren race `409` met actuele status. Test een interleaving tussen read en batch.
 
-### P2 — Een ingetrokken sessie kan nog een lopende receptwrite afronden
+**Herbeoordeling:** `worker/routes/accounts.ts:190-205` controleert nu `meta.changes` van de conditionele statuswijziging en geeft `409` als OTP-consumptie de race wint. De daaropvolgende user-cleanup is beperkt tot een daadwerkelijk `revoked` uitnodiging. De gerichte D1-test forceert consumptie tussen de eerste read en de batch en verwacht `409` plus een actief account. Deze bevinding is daarmee voor de lokale bouwstand opgelost.
+
+### P2 — Een ingetrokken sessie kan nog een lopende receptwrite afronden — opgelost in lokale bouwstand
 
 `worker/routes/recipes.ts:183-254` controleert een actief account in de SQL voor create/update, maar niet de geldigheid van de startsessie. De aanwezige `beforeWrite`-testnaad maakt dit concreet: laat daarin `revokeSession(db, ownerId, sessionId, now)` uitvoeren en de reeds geauthenticeerde `POST` of `PUT` kan daarna nog `201` of `200` opleveren. `recipes.ts:287-309` heeft voor DELETE zelfs geen actuele account- of sessievoorwaarde op de write. Een beheerder kan het account na `requirePrincipal` blokkeren en vóór de delete-batch; de DELETE muteert daarna nog recepten en uploadstatus. Dit is een beperkt venster voor een al begonnen verzoek, maar het schendt het afgesproken direct intrekken van writes.
 
 Remedie: zet een actuele account- én sessievoorwaarde op de eerste conditionele write van elk receptpad, controleer `meta.changes`, en laat vervolgstappen alleen bij een geslaagde wijziging lopen. Test intrekking precies tussen de route-authenticatie en de batch.
+
+**Herbeoordeling:** `worker/routes/recipes.ts:16-31` definieert één live-sessievoorwaarde met actieve accountstatus, niet-ingetrokken sessie, absolute duur, inactiviteitsgrens en Better Auth-expiratie. POST, PUT en DELETE gebruiken die op hun eerste conditionele DB-write. Verdere mutaties in dezelfde D1-batch zijn afhankelijk van het nieuw geschreven recept of een unieke `write_token`, zodat een mislukte eerste write geen ingrediënten, uploadkoppelingen of outboxrijen wijzigt. De gerichte D1-test trekt de sessie voor elk writepad in en blokkeert het account voor DELETE; die verwacht `401`/`403` en ongewijzigde recept-, upload- en outboxstatus. Deze bevinding is daarmee voor de lokale bouwstand opgelost.
 
 ## Controles die de huidige code wel ondersteunt
 

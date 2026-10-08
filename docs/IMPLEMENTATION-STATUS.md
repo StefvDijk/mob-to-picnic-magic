@@ -95,3 +95,17 @@ Browserbewijs: e-mailcodescherm en focus, inloggen, recept met `1/3 kg` bewaren,
 De browserproef leidde tot een echte datumcorrectie: Better Auth bewaart native datums als ISO-tekst, terwijl enkele eigen SQL-guards epochmilliseconden verwachtten. De accountmanager heeft de helpers en goedkeurings-/verzendtriggers gecorrigeerd in `0006`; native uitnodigingsdatums zijn ook aangepast. De directeur las de fix en herhaalde auth/database/accounts: **16/16 geslaagd**, inclusief een echte OTP-login met exact genormaliseerde vervaldatum. Het accountscherm toont nu een geldige einddatum.
 
 De [beveiligingsreview](reviews/SECURITY.md) beschrijft resterende P1/P2-punten. Er is nog geen toelating voor productie of pilot. De Picnic-manager bouwt nu versleutelde koppeling en alleen-lezen product-/mandroutes; de privacymanager bereidt fysieke opruiming en retentie voor.
+
+### Picnic-koppeling en onderhoud — aangesloten, aanvullende racecontrole loopt
+
+De Picnic-backend is aangesloten op de hoofdhandler: inloggen, hervatbare SMS-verificatie, ontkoppelen, productzoeken en het lezen van de winkelmand. Hervatsleutels worden per gebruiker versleuteld; wachtwoorden worden niet opgeslagen. De transportlaag heeft een echte afbreekbare deadline en een begrensd antwoord. De accountstatus meldt apart of een SMS-code nog nodig is, ook tijdens vervanging van een bestaande koppeling.
+
+De directeur heeft de volledige lokale suite herhaald: **72/72 tests groen in 13 bestanden**, plus Worker-typechecking. Een daarna toegevoegde hoofdhandlerproef voor koppelen → accountstatus → SMS → gekoppeld slaagt ook: **17/17 Picnic-routeproeven**. De privacymanager heeft vervolgens de volledige set van **73/73** onafhankelijk herhaald. Dit zijn gesimuleerde leveranciersantwoorden met echte lokale D1/R2; echte Picnic-toegang is nog niet bewezen.
+
+De scheduled handler roept het hervatbare onderhoud aan. De onafhankelijke review bevestigt de fixes voor ingetrokken sessies tijdens receptwrites en voor gelijktijdig accepteren/intrekken van een uitnodiging. De aanvullende directeurscontrole vond nog twee opslagraces: een receptwijziging tijdens verwijderen en een nieuwe bronkoppeling tijdens het claimen van een verweesde upload. Deze worden met deterministische regressietests hersteld voordat de onderhoudsslice definitief akkoord krijgt.
+
+Volgende werkronde: Picnic-popup en product-/winkelmandweergave; vervolgens import, voorstellen en duurzame toevoegacties. De oorspronkelijke servicewijziging is opnieuw byte voor byte gecontroleerd en behouden.
+
+### Aanvullende directeurscontrole — opslagraces opgelost
+
+De laatste recipeDELETE/PUT-race is atomisch hersteld; de directeur herhaalde de recept- en accountrouteproeven: **6/6 groen**. Opruiming claimt verweesde uploads pas na een actuele controle op recept- en importkoppelingen. Een reeds geclaimde mislukte R2-verwijdering blijft in het opslagquotum meetellen. De accountpurge controleert zijn lease opnieuw binnen dezelfde D1-transactie, vóór enige gegevensverwijdering. De directeur inspecteerde de SQL en herhaalde de definitieve onderhouds- en opslagtests: **24/24 groen**, plus Worker-typecheck. Hiermee is deze backendstap lokaal akkoord; live leverancierstoegang en pilotgates blijven open.

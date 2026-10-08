@@ -169,4 +169,65 @@ describe('authenticated recipe routes with D1', () => {
     expect(blockedCreate?.status).toBe(403);
     await db.prepare(`UPDATE app_accounts SET status='active',updated_at=? WHERE id=?`).bind(Date.now(), member!.id).run();
   });
+
+  it('stops every write after session revocation and leaves delete children untouched when blocked', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const session = await db.prepare(`SELECT session_id AS id FROM session_metadata WHERE owner_id=? AND revoked_at IS NULL LIMIT 1`)
+      .bind(owner!.id).first<{ id: string }>();
+    const uploadId = await createStoredUpload(owner!.id);
+    const input = { title: 'Race guard', baseServings: '2', steps: [], ingredients: [], uploads: [uploadId] };
+    const created = await handleRecipes(request('/api/recipes', 'POST', input, memberCookie), testEnv);
+    expect(created?.status).toBe(201);
+    const { recipe } = await created!.json() as { recipe: { id: string } };
+    const before = await db.prepare(`SELECT COUNT(*) AS count FROM recipes WHERE owner_id=?`).bind(owner!.id).first();
+    const revoke = async () => { await db.prepare(`UPDATE session_metadata SET revoked_at=? WHERE session_id=?`)
+      .bind(Date.now(), session!.id).run(); };
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const path = method === 'POST' ? '/api/recipes' : `/api/recipes/${recipe.id}`;
+      const payload = method === 'DELETE' ? undefined : { ...input, expectedVersion: 1, title: 'Must not be saved' };
+      const response = await handleRecipes(request(path, method, payload, memberCookie), testEnv, { beforeWrite: revoke });
+      expect(response?.status).toBe(401);
+      // Restore only this test fixture to exercise the next independent interleaving.
+      await db.prepare(`UPDATE session_metadata SET revoked_at=NULL WHERE session_id=?`).bind(session!.id).run();
+    }
+    const blockedDelete = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'DELETE', undefined, memberCookie), testEnv, {
+      beforeWrite: async () => { await db.prepare(`UPDATE app_accounts SET status='blocked' WHERE id=?`).bind(owner!.id).run(); },
+    });
+    expect(blockedDelete?.status).toBe(403);
+    await db.prepare(`UPDATE app_accounts SET status='active' WHERE id=?`).bind(owner!.id).run();
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipes WHERE owner_id=?`).bind(owner!.id).first()).toEqual(before);
+    expect(await db.prepare(`SELECT title,version,deleted_at FROM recipes WHERE id=?`).bind(recipe.id).first())
+      .toEqual({ title: 'Race guard', version: 1, deleted_at: null });
+    expect(await db.prepare(`SELECT status FROM uploads WHERE id=?`).bind(uploadId).first()).toEqual({ status: 'stored' });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_uploads WHERE recipe_id=? AND upload_id=?`).bind(recipe.id, uploadId).first())
+      .toEqual({ count: 1 });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM outbox WHERE task_type='delete_upload' AND task_id=?`).bind(uploadId).first())
+      .toEqual({ count: 0 });
+  });
+
+  it('deletes an upload attached by a concurrent update before the recipe delete commits', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const newUploadId = await createStoredUpload(owner!.id);
+    const created = await handleRecipes(request('/api/recipes', 'POST', {
+      title: 'Race source', baseServings: null, steps: [], ingredients: [], uploads: [],
+    }, memberCookie), testEnv);
+    expect(created?.status).toBe(201);
+    const { recipe } = await created!.json() as { recipe: { id: string } };
+    const deleted = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'DELETE', undefined, memberCookie), testEnv, {
+      beforeWrite: async () => {
+        const updated = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'PUT', {
+          expectedVersion: 1, title: 'Updated during delete', baseServings: null,
+          steps: [], ingredients: [], uploads: [newUploadId],
+        }, memberCookie), testEnv);
+        expect(updated?.status).toBe(200);
+      },
+    });
+    expect(deleted?.status).toBe(204);
+    expect(await db.prepare(`SELECT status FROM uploads WHERE id=?`).bind(newUploadId).first())
+      .toEqual({ status: 'deleting' });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_uploads WHERE upload_id=?`).bind(newUploadId).first())
+      .toEqual({ count: 0 });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM outbox WHERE task_type='delete_upload' AND task_id=?`).bind(newUploadId).first())
+      .toEqual({ count: 1 });
+  });
 });

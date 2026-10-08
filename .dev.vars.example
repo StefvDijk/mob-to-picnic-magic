@@ -5,6 +5,11 @@ AUTH_SECRET=""
 OTP_HMAC_SECRET=""
 EMAIL_ADDRESS_HMAC_SECRET=""
 
+# A fourth independent key: exactly 32 random bytes encoded as base64.
+PICNIC_ENCRYPTION_KEY=""
+# Optional decrypt-only keys during rotation: JSON map of old version to base64 key.
+# PICNIC_ENCRYPTION_PREVIOUS_KEYS='{"v0":"..."}'
+
 # Real email sending also requires a verified sender domain. Leave empty for
 # tests with an explicitly injected local email provider; no automatic fallback.
 RESEND_API_KEY=""

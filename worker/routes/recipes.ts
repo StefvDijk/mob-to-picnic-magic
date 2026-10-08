@@ -1,6 +1,7 @@
 import { requirePrincipal, type AuthEnv, type Principal } from '../auth';
 import { formatRational, parseQuantity, parseRational, type Quantity } from '../../shared/quantities';
 import type { RecipeDto, RecipeIngredientDto } from '../../shared/recipes';
+import { getSessionAccess, sessionExpiryMillisSql } from '../db';
 
 const NO_STORE = { 'Cache-Control': 'no-store, private', Pragma: 'no-cache' };
 const MAX_INGREDIENTS = 200;
@@ -10,7 +11,22 @@ const MAX_STEPS = 100;
 type IngredientInput = Omit<RecipeIngredientDto, 'id' | 'ordinal'>;
 export interface RecipeRouteDependencies {
   /** Optional deterministic seam for exercising state changes between auth and the write transaction. */
-  beforeWrite?: (kind: 'create' | 'update') => Promise<void>;
+  beforeWrite?: (kind: 'create' | 'update' | 'delete') => Promise<void>;
+}
+const liveSessionSql = `EXISTS(SELECT 1 FROM app_accounts a
+  JOIN session_metadata sm ON sm.owner_id=a.id
+  JOIN session s ON s.id=sm.session_id AND s.userId=sm.owner_id
+  WHERE a.id=? AND sm.session_id=? AND a.status='active' AND sm.revoked_at IS NULL
+    AND sm.authenticated_at+2592000000>? AND sm.last_activity_at+1209600000>?
+    AND (${sessionExpiryMillisSql})>?)`;
+function sessionArgs(principal: Principal, now: number) {
+  return [principal.ownerId, principal.sessionId, now, now, now] as const;
+}
+async function accessFailure(env: AuthEnv, principal: Principal): Promise<Response | null> {
+  const access = await getSessionAccess(env.DB, principal.ownerId, principal.sessionId, Date.now());
+  if (access.success) return null;
+  return access.reason === 'blocked' ? fail(403, 'FORBIDDEN', 'Geen toegang.')
+    : fail(401, 'UNAUTHENTICATED', 'Log opnieuw in.');
 }
 type RecipeInput = {
   title: string; sourceLabel: string | null; sourceUrl: string | null; baseServings: string | null;
@@ -190,9 +206,9 @@ async function createRecipe(request: Request, env: AuthEnv, principal: Principal
   const id = crypto.randomUUID();
   const servings = servingsColumns(input.baseServings);
   const statements = [env.DB.prepare(`INSERT INTO recipes(id,owner_id,title,source_label,source_url,base_servings_num,base_servings_den,version,steps_json,created_at,updated_at)
-    SELECT ?,?,?,?,?,?,?,1,?,?,? WHERE EXISTS(SELECT 1 FROM app_accounts WHERE id=? AND status='active')`)
+    SELECT ?,?,?,?,?,?,?,1,?,?,? WHERE ${liveSessionSql}`)
     .bind(id, principal.ownerId, input.title, input.sourceLabel, input.sourceUrl,
-      servings.num, servings.den, JSON.stringify(input.steps), now, now, principal.ownerId),
+      servings.num, servings.den, JSON.stringify(input.steps), now, now, ...sessionArgs(principal, now)),
   ...input.ingredients.map((item, index) => insertIngredient(env, principal.ownerId, id, item, index, now)),
   ...input.uploads.map(uploadId => env.DB.prepare(`INSERT INTO recipe_uploads(owner_id,recipe_id,upload_id)
     SELECT ?,?,u.id FROM uploads u JOIN recipes r ON r.owner_id=u.owner_id AND r.id=? JOIN app_accounts a ON a.id=r.owner_id
@@ -201,7 +217,7 @@ async function createRecipe(request: Request, env: AuthEnv, principal: Principal
   let results: D1Result[];
   try { results = await env.DB.batch(statements); }
   catch { return fail(400, 'INVALID_RECIPE', 'Controleer de receptgegevens.'); }
-  if (results[0]?.meta.changes !== 1) return fail(403, 'FORBIDDEN', 'Geen toegang.');
+  if (results[0]?.meta.changes !== 1) return await accessFailure(env, principal) ?? fail(409, 'WRITE_CONFLICT', 'Het recept kon niet worden bewaard.');
   const recipe = await loadRecipe(env, principal.ownerId, id);
   return json({ recipe }, 201);
 }
@@ -225,9 +241,9 @@ async function updateRecipe(request: Request, env: AuthEnv, principal: Principal
   const ownsArgs = [principal.ownerId, id, Number(expectedVersion) + 1, writeToken] as const;
   const statements = [env.DB.prepare(`UPDATE recipes SET title=?,source_label=?,source_url=?,base_servings_num=?,base_servings_den=?,
     steps_json=?,version=version+1,updated_at=?,write_token=? WHERE owner_id=? AND id=? AND version=? AND deleted_at IS NULL
-    AND EXISTS(SELECT 1 FROM app_accounts WHERE id=? AND status='active')`)
+    AND ${liveSessionSql}`)
     .bind(input.title, input.sourceLabel, input.sourceUrl, servings.num, servings.den, JSON.stringify(input.steps), now,
-      writeToken, principal.ownerId, id, expectedVersion, principal.ownerId),
+      writeToken, principal.ownerId, id, expectedVersion, ...sessionArgs(principal, now)),
   env.DB.prepare(`UPDATE ingredients SET retired_at=? WHERE owner_id=? AND recipe_id=? AND retired_at IS NULL AND ${ownsWrite}`)
     .bind(now, principal.ownerId, id, ...ownsArgs),
   env.DB.prepare(`DELETE FROM recipe_uploads WHERE owner_id=? AND recipe_id=? AND ${ownsWrite}`)
@@ -247,8 +263,8 @@ async function updateRecipe(request: Request, env: AuthEnv, principal: Principal
   try { results = await env.DB.batch(statements); }
   catch { return fail(400, 'INVALID_RECIPE', 'Controleer de receptgegevens.'); }
   if (results[0]?.meta.changes !== 1) {
-    const account = await env.DB.prepare(`SELECT status FROM app_accounts WHERE id=?`).bind(principal.ownerId).first<{ status: string }>();
-    if (account?.status !== 'active') return fail(403, 'FORBIDDEN', 'Geen toegang.');
+    const denied = await accessFailure(env, principal);
+    if (denied) return denied;
     return fail(409, 'VERSION_CONFLICT', 'Het recept is gewijzigd. Laad het opnieuw.');
   }
   return json({ recipe: await loadRecipe(env, principal.ownerId, id) });
@@ -284,29 +300,37 @@ async function listRecipes(request: Request, env: AuthEnv, principal: Principal)
   return json({ recipes: recipes.filter((recipe): recipe is RecipeDto => recipe !== null),
     nextCursor: more && last ? encodeCursor(last.updatedAt, last.id) : null });
 }
-async function deleteRecipe(env: AuthEnv, principal: Principal, id: string): Promise<Response> {
+async function deleteRecipe(env: AuthEnv, principal: Principal, id: string, deps: RecipeRouteDependencies): Promise<Response> {
   const existing = await env.DB.prepare(`SELECT id FROM recipes WHERE owner_id=? AND id=? AND deleted_at IS NULL`)
     .bind(principal.ownerId, id).first<{ id: string }>();
   if (!existing) return fail(404, 'NOT_FOUND', 'Niet gevonden.');
+  await deps.beforeWrite?.('delete');
   const now = Date.now();
-  const uploadRows = await env.DB.prepare(`SELECT u.id,u.object_key AS objectKey FROM recipe_uploads ru JOIN uploads u
-    ON u.owner_id=ru.owner_id AND u.id=ru.upload_id WHERE ru.owner_id=? AND ru.recipe_id=? AND u.status='stored'`)
-    .bind(principal.ownerId, id).all<{ id: string; objectKey: string }>();
-  const statements = [env.DB.prepare(`UPDATE recipes SET deleted_at=?,updated_at=?,version=version+1 WHERE owner_id=? AND id=? AND deleted_at IS NULL`)
-    .bind(now, now, principal.ownerId, id),
-  env.DB.prepare(`DELETE FROM recipe_uploads WHERE owner_id=? AND recipe_id=?`).bind(principal.ownerId, id)];
-  for (const upload of uploadRows.results) {
-    statements.push(env.DB.prepare(`UPDATE uploads SET status='deleting',deleted_at=? WHERE owner_id=? AND id=? AND status='stored'
-      AND NOT EXISTS(SELECT 1 FROM recipe_uploads WHERE owner_id=? AND upload_id=? AND recipe_id!=?)
-      AND NOT EXISTS(SELECT 1 FROM import_uploads iu JOIN imports i ON i.owner_id=iu.owner_id AND i.id=iu.import_id
-        WHERE iu.owner_id=? AND iu.upload_id=? AND i.status NOT IN ('expired','failed'))`)
-      .bind(now, principal.ownerId, upload.id, principal.ownerId, upload.id, id, principal.ownerId, upload.id));
-    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO outbox(id,owner_id,task_type,task_id,version,payload_json,status,attempts,available_at,created_at,updated_at)
-      SELECT ?,?, 'delete_upload',u.id,1,json_object('uploadId',u.id,'objectKey',u.object_key),'pending',0,?,?,? FROM uploads u
-      WHERE u.owner_id=? AND u.id=? AND u.status='deleting'`)
-      .bind(crypto.randomUUID(), principal.ownerId, now, now, now, principal.ownerId, upload.id));
-  }
-  await env.DB.batch(statements);
+  const writeToken = crypto.randomUUID();
+  const ownsDeletion = `EXISTS(SELECT 1 FROM recipes WHERE owner_id=? AND id=? AND write_token=? AND deleted_at IS NOT NULL)`;
+  const ownsArgs = [principal.ownerId, id, writeToken] as const;
+  // Read associations inside this batch, after any concurrent recipe update and before detaching them.
+  const unsharedUpload = `EXISTS(SELECT 1 FROM recipe_uploads ru
+      WHERE ru.owner_id=u.owner_id AND ru.recipe_id=? AND ru.upload_id=u.id)
+    AND NOT EXISTS(SELECT 1 FROM recipe_uploads ru
+      WHERE ru.owner_id=u.owner_id AND ru.upload_id=u.id AND ru.recipe_id!=?)
+    AND NOT EXISTS(SELECT 1 FROM import_uploads iu JOIN imports i ON i.owner_id=iu.owner_id AND i.id=iu.import_id
+      WHERE iu.owner_id=u.owner_id AND iu.upload_id=u.id AND i.status NOT IN ('expired','failed'))`;
+  const statements = [env.DB.prepare(`UPDATE recipes SET deleted_at=?,updated_at=?,version=version+1,write_token=?
+    WHERE owner_id=? AND id=? AND deleted_at IS NULL AND ${liveSessionSql}`)
+    .bind(now, now, writeToken, principal.ownerId, id, ...sessionArgs(principal, now)),
+  env.DB.prepare(`UPDATE uploads AS u SET status='deleting',deleted_at=?
+    WHERE u.owner_id=? AND u.status='stored' AND ${ownsDeletion} AND ${unsharedUpload}`)
+    .bind(now, principal.ownerId, ...ownsArgs, id, id),
+  env.DB.prepare(`INSERT OR IGNORE INTO outbox(id,owner_id,task_type,task_id,version,payload_json,status,attempts,available_at,created_at,updated_at)
+    SELECT 'delete-upload:'||u.id,u.owner_id,'delete_upload',u.id,1,
+      json_object('uploadId',u.id,'objectKey',u.object_key),'pending',0,?,?,?
+    FROM uploads u WHERE u.owner_id=? AND u.status='deleting' AND ${ownsDeletion} AND ${unsharedUpload}`)
+    .bind(now, now, now, principal.ownerId, ...ownsArgs, id, id),
+  env.DB.prepare(`DELETE FROM recipe_uploads WHERE owner_id=? AND recipe_id=? AND ${ownsDeletion}`)
+    .bind(principal.ownerId, id, ...ownsArgs)];
+  const results = await env.DB.batch(statements);
+  if (results[0]?.meta.changes !== 1) return await accessFailure(env, principal) ?? fail(404, 'NOT_FOUND', 'Niet gevonden.');
   return new Response(null, { status: 204, headers: NO_STORE });
 }
 
@@ -334,6 +358,6 @@ export async function handleRecipes(request: Request, env: AuthEnv, deps: Recipe
     return recipe ? json({ recipe }) : fail(404, 'NOT_FOUND', 'Niet gevonden.');
   }
   if (request.method === 'PUT') return updateRecipe(request, env, principal, id, deps);
-  if (request.method === 'DELETE') return deleteRecipe(env, principal, id);
+  if (request.method === 'DELETE') return deleteRecipe(env, principal, id, deps);
   return fail(405, 'METHOD_NOT_ALLOWED', 'Deze handeling is niet beschikbaar.');
 }

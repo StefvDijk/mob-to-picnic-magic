@@ -2,9 +2,12 @@ import { handleAuth, type AuthDependencies, type AuthEnv } from './auth';
 import { handleAccounts } from './routes/accounts';
 import { handleRecipes } from './routes/recipes';
 import { boundedRequest, privateApiResponse } from './http';
+import { handlePicnic, type PicnicDependencies } from './routes/picnic';
+import type { PicnicKeyEnv } from './security/credentials';
+import { runMaintenance } from './jobs/maintenance';
 
 /** Test mail injection is explicitly rejected by the auth module in production. */
-export async function handleRequest(request: Request, env: AuthEnv, deps: AuthDependencies = {}): Promise<Response> {
+export async function handleRequest(request: Request, env: AuthEnv & PicnicKeyEnv, deps: AuthDependencies & PicnicDependencies = {}): Promise<Response> {
   try {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/api/health") {
@@ -15,6 +18,7 @@ export async function handleRequest(request: Request, env: AuthEnv, deps: AuthDe
     const response = await handleAuth(bounded, env, deps)
       ?? await handleAccounts(bounded, env, deps)
       ?? await handleRecipes(bounded, env)
+      ?? await handlePicnic(bounded, env, deps)
       ?? Response.json({ error: { code: 'NOT_FOUND', message: 'Niet gevonden.' } }, { status: 404 });
     return privateApiResponse(response);
   } catch {
@@ -28,5 +32,8 @@ export async function handleRequest(request: Request, env: AuthEnv, deps: AuthDe
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return handleRequest(request, env);
+  },
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
+    ctx.waitUntil(runMaintenance(env));
   },
 };
