@@ -1,0 +1,11 @@
+# Copy to ignored .dev.vars for local development only.
+# Generate three INDEPENDENT random values of at least 32 bytes.
+# For each value: node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+AUTH_SECRET=""
+OTP_HMAC_SECRET=""
+EMAIL_ADDRESS_HMAC_SECRET=""
+
+# Real email sending also requires a verified sender domain. Leave empty for
+# tests with an explicitly injected local email provider; no automatic fallback.
+RESEND_API_KEY=""
+EMAIL_FROM=""

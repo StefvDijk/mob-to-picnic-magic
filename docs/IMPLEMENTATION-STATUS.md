@@ -9,9 +9,9 @@ De directeur integreert, bewaakt scope en voert de eindcontrole uit. Vakmanagers
 | Rol | Verantwoordelijkheid | Status |
 | --- | --- | --- |
 | Infrastructuurmanager | Workers-runtime, lokale bindings, pakketten, build/testconfig en deployvoorbereiding | Lokale basis geïmplementeerd en akkoord na manager- en directeurscontrole; externe gates blijven open |
-| Databasemanager | D1-schema, tenantrelaties, transacties, budgetten en verwijdering | Schemaontwerp beoordeeld; implementatieronde gestart |
+| Databasemanager | D1-schema, tenantrelaties, transacties, budgetten en verwijdering | Basis goedgekeurd na 9 D1-tests; directeur heeft deze en 2 infrastructuurtests herhaald |
 | Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Eerste afgebakende taak voor exacte productselectie ontworpen |
-| Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Geïnstalleerde Better Auth onderzocht; integratievoorwaarden vastgelegd |
+| Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Manager en uitvoerder bouwen en toetsen daadwerkelijke authenticatie en account-routes |
 | Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Gepland |
 | Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Gepland |
 | Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Gepland |
@@ -59,3 +59,15 @@ De accountmanager controleerde de werkelijk geïnstalleerde Better Auth-code. Ee
 Echte Picnic-authenticatie/SMS en productdata, CPU-meting op de echte Workers Free-runtime, e-maildomein en benodigde leverancierssecrets, en beoordeling van Picnic-toegang blijven afzonderlijk te bewijzen. Lokale ontwikkeling en tests kunnen intussen doorgaan. Er worden geen betaalde abonnementen of echte boodschappen stil geactiveerd.
 
 Eerste vastgelegde bouwstap: commit `3249c05` op `codex/picnic-mvp`, met specificaties en lokaal gecontroleerde infrastructuur. De oorspronkelijke servicewijziging is niet in die commit meegenomen.
+
+### Databasebasis — manager akkoord, directeur gecontroleerd
+
+`migrations/0001_initial.sql` en `worker/db/` zijn toegevoegd. De manager heeft de uitvoerder beoordeeld; de directeur heeft de uiteindelijke helpers geïnspecteerd en `npm run test:worker -- --run worker/db/index.test.ts test/bindings.test.ts` opnieuw uitgevoerd: 11/11 geslaagd, waarvan 9 databaseproeven. Worker-typechecking slaagde eveneens. De testomgeving is expliciet `APP_ENV=test` en gebruikt Cloudflares officiële migratiehulpmiddel.
+
+Bewezen binnen deze databaseproeven: tenantrelaties, de laatste uitnodigingsplek bij gelijktijdige verzoeken, budgetreserveringen en onbekende uitkomsten, gehele centen, duurzame uitvoeringsclaims, sessieverval/intrekking, sessieverwijdering met bestaande goedkeuring en opruimen van lid- en beheeraccounts zonder andere gebruikers te verwijderen. De gevonden blokkerende verwijzingen naar sessies en persoonlijke historie zijn hersteld.
+
+Nog geen volledige toevoeg- of verwijderflow: routes moeten herhaalde goedkeuringen naar dezelfde actie terugvertalen; jobs moeten externe bestanden werkelijk verwijderen voordat de laatste database-opruiming wordt afgerond. Nieuwe routes en jobs moeten bij schrijven de actuele accountstatus bewaken. Een databaseproef bewijst die toekomstige integraties niet.
+
+De directeur heeft daarnaast een singleton voor de twee beheer-stopinstellingen toegevoegd (`0002`) en een expliciete netto-/uitlekgewichtbasis voor mandtoewijzingen (`0003`). Die basis mag bij NULL niet als bewezen productmatch worden gebruikt. Accounts-tests en latere producttests toetsen de bijbehorende functionaliteit.
+
+De bekende namen van de authenticatie- en e-mailsecrets staan nu in Wrangler-configuratie en de gegenereerde types. `.dev.vars.example` bevat uitsluitend lege invulvelden. Er zijn geen echte credentials vastgelegd. Ontbrekende secrets veroorzaken bewust geen automatische productie-mock.

@@ -6,7 +6,7 @@ Werkcontract tussen implementatieteams, 8 oktober 2026. De manager die een route
 
 JSON onder `/api`, sessie uitsluitend via HttpOnly-cookie. Persoonlijke antwoorden gebruiken `Cache-Control: no-store`. Schrijfacties vereisen geldige origin/CSRF-controle. Identiteit en rol komen uit serverauthenticatie. Een object van iemand anders levert dezelfde 404 op als een onbekend object. Validatiefouten zijn 400, niet ingelogd 401, geweigerde accounttoegang 403, verouderde versie 409, limiet 429 en tijdelijk ontbrekende integratie 503.
 
-Foutvorm: `{ error: { code, message, fields? } }`, met Nederlandse veilige melding, geen providerpayload, stack of secrets. Bedragen zijn gehele eurocenten; hoeveelheden zijn decimale strings met `g`, `ml` of `piece`, of expliciet onbekend/globaal. Instellingen en onzekere kenmerken worden niet stil aangevuld. Server geeft eigenaren nooit rechtstreeks controle over executionstatus, prijs of autorisatie.
+Foutvorm: `{ error: { code, message, fields? } }`, met Nederlandse veilige melding, geen providerpayload, stack of secrets. Bedragen zijn gehele eurocenten; hoeveelheden zijn exacte strings met `g`, `ml` of `piece`, of expliciet onbekend/globaal. Numerieke strings zijn een begrensde decimale notatie of een exacte breuk `n/d`; bijvoorbeeld `1/3` mag niet stil worden afgerond bij opslaan en teruglezen. De gedeelde parser valideert en normaliseert de notatie. Instellingen en onzekere kenmerken worden niet stil aangevuld. Server geeft eigenaren nooit rechtstreeks controle over executionstatus, prijs of autorisatie.
 
 ## Routes
 

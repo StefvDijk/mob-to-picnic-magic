@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 
 describe("local Worker bindings", () => {
   it("provides isolated D1, private R2, and both queue producers", async () => {
+    expect(env.APP_ENV).toBe("test");
     const id = crypto.randomUUID();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS binding_smoke (id TEXT PRIMARY KEY, value TEXT NOT NULL)").run();
     await env.DB.prepare("INSERT INTO binding_smoke (id, value) VALUES (?, ?)").bind(id, "ok").run();
