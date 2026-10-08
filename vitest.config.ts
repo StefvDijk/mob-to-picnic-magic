@@ -12,6 +12,6 @@ export default defineConfig(async () => ({
     }),
   ],
   test: {
-    include: ["test/**/*.test.ts", "worker/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "worker/**/*.test.ts", "shared/**/*.test.ts"],
   },
 }));

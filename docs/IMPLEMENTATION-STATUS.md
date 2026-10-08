@@ -10,9 +10,9 @@ De directeur integreert, bewaakt scope en voert de eindcontrole uit. Vakmanagers
 | --- | --- | --- |
 | Infrastructuurmanager | Workers-runtime, lokale bindings, pakketten, build/testconfig en deployvoorbereiding | Lokale basis geïmplementeerd en akkoord na manager- en directeurscontrole; externe gates blijven open |
 | Databasemanager | D1-schema, tenantrelaties, transacties, budgetten en verwijdering | Basis goedgekeurd na 9 D1-tests; directeur heeft deze en 2 infrastructuurtests herhaald |
-| Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Eerste afgebakende taak voor exacte productselectie ontworpen |
-| Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Manager en uitvoerder bouwen en toetsen daadwerkelijke authenticatie en account-routes |
-| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Gepland |
+| Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Exacte hoeveelheden en productselectie geïmplementeerd; managerreview en veilige receptbewerkingen lopen |
+| Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Eerste implementatie en API-aansluiting gecontroleerd door manager en directeur; 9 gerichte tests groen |
+| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Analyse gestart voor echte login, recepten en account-/beheerinterface |
 | Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Gepland |
 | Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Gepland |
 | Kwaliteitsmanager | Integratietests, foutinjectie en acceptatiematrix | Gepland |
@@ -49,9 +49,13 @@ Exacte nieuwe pins: Wrangler 4.148.0, Vitest 4.1.10, Cloudflare Vitest-plugin 1.
 
 Open kwaliteitswerk: bestaande lintfouten in vijf bron/configlocaties en 36 door npm gerapporteerde dependencykwetsbaarheden moeten nog worden beoordeeld en waar relevant opgelost. Geen groen totaalrelease-oordeel op basis van deze eerste tests.
 
-### Accountonderzoek — nog geen implementatieakkoord
+### Accounts — eerste implementatie gecontroleerd, integratie volgt
 
 De accountmanager controleerde de werkelijk geïnstalleerde Better Auth-code. Een onbekend codeverzoek kan vóór de gebruikerscontrole een verificatierij schrijven; daarom komt de adres-/uitnodigingscontrole vóór de bibliotheekhandler. Authenticatieantwoorden kunnen sessietokens bevatten en worden voor de browser gesaneerd. Slechts benodigde OTP-/sessieroutes worden toegelaten. Absolute en inactieve sessiegrenzen vereisen eigen metadata naast Better Auth. De directeur heeft het native databaseschema uit de geïnstalleerde 1.7.7-code uitgelezen als invoer voor de databasemanager.
+
+De eerste authenticatie- en accountroutes zijn gebouwd. Na directeursbevindingen zijn onzekere e-mailuitkomsten blijvend ten laste van het quotum gebracht, AI-budgetmaanden op Europe/Amsterdam gebaseerd en gelijktijdige wijzigingen aan beheer-stopinstellingen veilig gemaakt. De manager heeft deze correcties gecontroleerd. De directeur heeft op 8 oktober opnieuw `npm run test:worker -- worker/auth/index.test.ts worker/routes/accounts.test.ts` uitgevoerd: 6/6 geslaagd in de lokale Workers-runtime. Leveranciersantwoorden zijn in deze tests vervangen; er is geen echte mail verzonden.
+
+De hoofdhandler is aangesloten op auth en accounts. Binnenkomende bodies zijn begrensd op werkelijke bytes, ook bij chunked overdracht of onjuiste Content-Length. Alle API-antwoorden verhinderen caching en verbergen interne foutdetails. De accountmanager heeft deze integratie onafhankelijk geïnspecteerd en beperkt akkoord gegeven. De directeur draaide de 6 accountproeven plus 3 HTTP-proeven: 9/9 groen. Daarna zijn ook de twee account-routeproeven via de hoofdhandler herhaald: beide groen. Browserintegratie en de onafhankelijke beveiligingsreview blijven open. De testconfig neemt nu ook gedeelde parserproeven onder `shared/` mee.
 
 
 ## Externe toelatingspunten
