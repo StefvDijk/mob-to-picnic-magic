@@ -309,6 +309,24 @@ describe('maintenance worker with local D1 and R2', () => {
       .bind(inviteeEmail, `renewed-hash-${inviteeId}`, adminId, now, now + DAY).run();
   });
 
+  it('purges a saved import at its original deadline while its recipe source snapshot survives', async () => {
+    const now = Date.now();
+    const ownerId = await createOwner('saved-import-expiry', now - DAY);
+    const recipeId = `saved-source-${crypto.randomUUID()}`;
+    await db.batch([
+      db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_text,status,expires_at,created_at,updated_at)
+        VALUES('saved-import-expiry',?,'text','original','saved',?,?,?)`).bind(ownerId, now - 1, now - 8 * DAY, now),
+      db.prepare(`INSERT INTO recipes(id,owner_id,title,steps_json,created_at,updated_at) VALUES(?,?,?,'[]',?,?)`)
+        .bind(recipeId, ownerId, 'Retained source', now, now),
+      db.prepare(`INSERT INTO recipe_sources(owner_id,recipe_id,import_id,candidate_index,source_kind,source_text,imported_at)
+        VALUES(?,?,'saved-import-expiry',NULL,'text','original',?)`).bind(ownerId, recipeId, now - 8 * DAY),
+    ]);
+    await runMaintenance({ DB: db, UPLOADS: uploads }, now);
+    expect(await db.prepare(`SELECT id FROM imports WHERE id='saved-import-expiry'`).first()).toBeNull();
+    expect(await db.prepare(`SELECT source_text AS sourceText FROM recipe_sources WHERE recipe_id=?`).bind(recipeId).first())
+      .toEqual({ sourceText: 'original' });
+  });
+
   it('enforces the 90 day limit and removes expired shared feedback', async () => {
     const now = Date.now();
     const ownerId = await createOwner('feedback', now - 100 * DAY);

@@ -8,6 +8,11 @@ import { RecipeWorkspace } from '@/components/RecipeWorkspace';
 
 type Section = 'recipes' | 'account' | 'admin';
 
+function clearOwnerDrafts(ownerId: string) {
+  sessionStorage.removeItem(`picnic:recipe-draft:${ownerId}`);
+  sessionStorage.removeItem(`picnic:pending-import:${ownerId}`);
+}
+
 export default function Index() {
   const [me, setMe] = useState<MeDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,7 +25,7 @@ export default function Index() {
     try {
       const next = await api.me();
       if (lastOwner.current && lastOwner.current !== next.account.id) {
-        sessionStorage.removeItem(`picnic:recipe-draft:${lastOwner.current}`);
+        clearOwnerDrafts(lastOwner.current);
       }
       lastOwner.current = next.account.id;
       setMe(next);
@@ -42,7 +47,7 @@ export default function Index() {
   }, [refreshMe]);
 
   function signedOut() {
-    if (lastOwner.current) sessionStorage.removeItem(`picnic:recipe-draft:${lastOwner.current}`);
+    if (lastOwner.current) clearOwnerDrafts(lastOwner.current);
     lastOwner.current = null;
     setMe(null);
     setError('');
@@ -69,7 +74,7 @@ export default function Index() {
       </nav>
       <main id="main-content" className="main-content" tabIndex={-1}>
         {error && <p className="error-message" role="alert">{error}</p>}
-        {section === 'recipes' && <RecipeWorkspace me={me} onAuthExpired={() => { setMe(null); setError('Je sessie is verlopen. Log opnieuw in om verder te gaan. Je concept blijft op dit apparaat bewaard.'); }} />}
+        {section === 'recipes' && <RecipeWorkspace key={me.account.id} me={me} onAuthExpired={() => { setMe(null); setError('Je sessie is verlopen. Log opnieuw in om verder te gaan. Je concept blijft op dit apparaat bewaard.'); }} />}
         {section === 'account' && <AccountPanel me={me} onRefresh={refreshMe} onSignedOut={signedOut} />}
         {section === 'admin' && me.account.role === 'admin' && <AdminPanel me={me} onRefreshMe={refreshMe} />}
       </main>

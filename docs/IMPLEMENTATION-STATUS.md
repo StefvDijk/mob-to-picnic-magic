@@ -10,11 +10,11 @@ De directeur integreert, bewaakt scope en voert de eindcontrole uit. Vakmanagers
 | --- | --- | --- |
 | Infrastructuurmanager | Workers-runtime, lokale bindings, pakketten, build/testconfig en deployvoorbereiding | Lokale basis geïmplementeerd en akkoord na manager- en directeurscontrole; externe gates blijven open |
 | Databasemanager | D1-schema, tenantrelaties, transacties, budgetten en verwijdering | Basis goedgekeurd na 9 D1-tests; directeur heeft deze en 2 infrastructuurtests herhaald |
-| Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Hoeveelheden, recepten en pure selectie goedgekeurd en aangesloten; adapters/imports/uitvoering volgen |
+| Backendmanager | Import, productberekening, Picnic-adapter, goedkeuring en duurzame uitvoering | Recepten, selectie, versleutelde Picnic-adapter en importwachtrij lokaal gecontroleerd; blijvende bronopslag in review; AI, voorstellen en toevoegacties volgen |
 | Accountmanager | Better Auth, uitnodigingen, sessies en accountbeheer | Eerste implementatie en API-aansluiting gecontroleerd door manager en directeur; 9 gerichte tests groen |
-| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Eerste account-/recept-/beheerschermen beoordeeld; directeur heeft mobiele browserflow getest; Picnic/import volgen |
-| Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Eerste onafhankelijke review vastgelegd; verwijder- en schrijfraces blijven open |
-| Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Ontwerpt duurzame opruiming en retentie; goedkope uitvoerder volgt na huidige Picnic-ronde |
+| Frontendmanager | Mobiele Nederlandstalige flow en toegankelijkheid | Accounts, recepten, beheer en Picnic-popup lokaal gecontroleerd; importeditor in eindcontrole |
+| Beveiligingsmanager | Onafhankelijke isolatie-, geheimen-, input- en misbruikcontrole | Eerste review en gevonden verwijder-/schrijfraces afgehandeld; nieuwe import- en uitvoeringsflows krijgen aanvullende controle |
+| Privacymanager | Gegevensstromen, retentie, verwijderproef en eerlijke privacy-uitleg | Hervatbare lokale D1/R2-opruiming met lease- en quota-raceproeven akkoord; live herstel- en leveranciersgates open |
 | Kwaliteitsmanager | Integratietests, foutinjectie en acceptatiematrix | Gepland |
 | Directeur | Integratie en definitieve controle tegen alle eisen | Actief |
 
@@ -123,3 +123,15 @@ Migratie 0008, eigenaargebonden importroutes, begrensde extractie van gestructur
 De backendmanager controleerde zijn uitvoerder en herhaalde 11 gerichte import-/queueproeven. De directeur draaide daarna **88/88 tests in 16 bestanden**, plus Worker-typechecking. De lokale ontwikkeltestdatabase is gemigreerd tot 0008. Een afzonderlijke HTTP-proef via de draaiende Vite/Worker-app gaf POST 202, werkelijke lokale queueverwerking en daarna GET `needs_review` met ongewijzigde fictieve brontekst. De tijdelijke testsessie is uitgelogd; er zijn geen Picnic- of AI-aanroepen gedaan.
 
 Deze eerste tekstpass claimt geen automatische herkenning: geplakte tekst blijft zichtbaar om te controleren. Volgende stappen zijn de importeditor, een blijvende zelfstandige bronkopie bij receptopslag (0009), AI-herkenning en foto-upload. De volledige MVP is daarmee nog niet afgerond.
+
+### Importeditor en bronkopieën — lokaal gecontroleerd
+
+De frontendmanager beoordeelde tekst-/linkinvoer, expliciete kandidaatkeuze, hervatbare concepten en het afzonderlijk verwijderen van de bewaarde bronkopie. De oorspronkelijke kandidaat blijft naast latere bewerkingen zichtbaar; een import met meerdere kandidaten blijft opnieuw te openen. De browser bewaart voor bronherstel alleen de importverwijzing naast de eigen receptbewerkingen, niet de volledige brontekst.
+
+De directeur controleerde met fictieve lokale tekst de werkelijke queueverwerking, concept- en bronherstel na herladen, bewaren en teruglezen vanuit het kookboek, plus de uitleg en annulering van de bronverwijderdialoog. De editor heeft op 320px geen horizontale overflow. Een afzonderlijke localhost-HTTP-proef bevestigde bronbehoud na receptbewerking en afzonderlijke bronverwijdering met behoud van het recept. Er zijn geen externe leveranciers aangeroepen.
+
+Deze browserproef vond een bestaande fout in de gedeelde hoeveelheidsparser: de genormaliseerde vorm van ‘onbekend’ en ‘naar behoefte’ werd bij opnieuw verwerken afgewezen. Een regressieproef faalde eerst en slaagt na de correctie; een onbekende hoeveelheid wordt nu ook werkelijk via de browser opgeslagen.
+
+Migratie 0009 bewaart de bron en het recept in één transactie met een uitgestelde foreign key. Een ingetrokken sessie, geblokkeerd account of verlopen import kan daarbij geen gedeeltelijke opslag veroorzaken. Ook het verstrijken van de tijd tussen validatie en schrijven is getest. Importretentie gebruikt de oorspronkelijke vervaldatum, inclusief al bewaarde concepten; de zelfstandige receptbron blijft bestaan. De verwijderroute houdt rekening met extra databasewijzigingen door de bronverwijdertrigger, zodat een geslaagde verwijdering correct 204 teruggeeft.
+
+De directeur herhaalde op de uiteindelijke code **94/94 tests in 16 bestanden**, beide TypeScript-controles en de productiebuild. Daarna slaagde de localhost-keten ook met het definitieve schema en met verwijderen van een recept waaraan nog een bron hangt. De lokale ontwikkeltabel is naar deze definitieve 0009-vorm gebracht met behoud van bestaande bronrijen en een schone foreign-keycontrole. AI-/fotoherkenning, productvoorstellen en duurzame boodschappenuitvoering blijven volgende bouwstappen.

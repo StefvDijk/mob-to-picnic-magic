@@ -277,6 +277,51 @@ a { color: hsl(153 50% 27%); text-underline-offset: .2em; }
 .picnic-dialog .auth-card { width: 100%; padding: 0; border: 0; box-shadow: none; }
 .picnic-dialog .auth-card h1 { font-size: 1.25rem; }
 .picnic-dialog button { min-height: 44px; }
+
+/* Import review and source context */
+.recipe-heading-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.recipe-source-snapshot { min-width: 0; margin: 18px 0; padding: 16px; border: 1px solid #d8e4d8; border-left: 4px solid #54805d; border-radius: 12px; background: #f6faf5; }
+.recipe-source-snapshot h2, .recipe-source-snapshot h3 { margin-top: 0; }
+.recipe-source-snapshot pre, .import-source pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border-radius: 9px; background: #fff; border: 1px solid #e1e5dd; font: inherit; line-height: 1.5; }
+.recipe-source-snapshot a, .import-source a { display: inline-flex; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
+.source-candidate { display: grid; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #d8e4d8; }
+.source-candidate p { margin: 0 0 7px; }
+.source-candidate ul, .source-candidate ol { margin: 0; padding-left: 22px; }
+.source-candidate li { padding: 3px 0; overflow-wrap: anywhere; }
+.source-candidate li small { display: block; color: #586b59; }
+.source-candidate li span { display: block; }
+.import-panel { display: grid; gap: 18px; }
+.import-panel .page-heading { margin: 0; }
+.import-form { display: grid; gap: 18px; }
+.import-form fieldset, .import-candidates { min-width: 0; margin: 0; padding: 14px; border: 1px solid #dfe5dc; border-radius: 12px; }
+.import-form legend, .import-candidates legend { padding: 0 7px; color: #54805d; font-weight: 750; }
+.import-source-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-source-options label { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; padding: 8px 12px; border: 1px solid #dfe5dc; border-radius: 9px; cursor: pointer; }
+.import-source-options input, .import-candidates input { width: 18px; height: 18px; accent-color: #286745; }
+.import-field { display: grid; gap: 6px; min-width: 0; }
+.import-field input, .import-field textarea { width: 100%; min-height: 46px; }
+.import-review { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
+.import-review > .panel, .import-review > section { min-width: 0; }
+.import-review > .import-source, .import-review > [aria-labelledby="review-points"], .import-review > [aria-labelledby="candidates-title"] { grid-column: 1 / -1; }
+.import-candidates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0 16px; }
+.import-candidates label { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-content: center; align-items: start; gap: 3px 9px; min-width: 0; min-height: 68px; padding: 12px; border: 1px solid #dfe5dc; border-radius: 10px; cursor: pointer; }
+.import-candidates label:has(input:checked) { border-color: #54805d; background: #f1f7f1; box-shadow: inset 0 0 0 1px #54805d; }
+.import-candidates input { grid-row: span 2; margin-top: 2px; }
+.import-candidates strong, .import-candidates span { min-width: 0; overflow-wrap: anywhere; }
+.import-candidates span { color: #687168; font-size: .88rem; line-height: 1.4; }
+.import-panel button { min-height: 44px; }
+@media (max-width: 760px) {
+  .recipe-heading-actions { width: 100%; }
+  .recipe-heading-actions > button { flex: 1 1 180px; }
+  .import-review { grid-template-columns: 1fr; }
+  .import-review > * { grid-column: 1 !important; }
+}
+@media (max-width: 520px) {
+  .import-candidates { grid-template-columns: 1fr; }
+  .import-source-options { display: grid; grid-template-columns: 1fr 1fr; }
+  .import-source-options label { justify-content: center; }
+  .recipe-source-snapshot { padding: 13px; }
+}
 @media (max-width: 520px) {
   .picnic-panel-heading, .picnic-section-heading { align-items: stretch; flex-direction: column; }
   .picnic-panel-heading > button, .picnic-panel-heading > [data-radix-collection-item], .picnic-cart-heading > button { width: 100%; }

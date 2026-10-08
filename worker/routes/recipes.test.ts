@@ -63,6 +63,19 @@ async function createStoredUpload(ownerId: string): Promise<string> {
   await db.prepare(`UPDATE uploads SET status='stored' WHERE id=?`).bind(id).run();
   return id;
 }
+async function seedImport(ownerId: string, options: { id?: string; status?: string; expiresAt?: number; sourceKind?: string; sourceText?: string | null; sourceUrl?: string | null; candidates?: unknown[] } = {}) {
+  const id = options.id ?? crypto.randomUUID(), now = Date.now();
+  const candidate = (title: string) => ({ title, sourceTitle: null, sourceUrl: null, baseServings: null,
+    sections: [], ingredients: [], steps: [], uncertainty: [] });
+  await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_url,source_text,source_label,source_title,status,result_json,expires_at,created_at,updated_at)
+    VALUES(?,?,?,?,?,'Original label','Extracted title',?,?,?, ?,?)`)
+    .bind(id, ownerId, options.sourceKind ?? 'text', options.sourceUrl ?? null, options.sourceText ?? 'Original recipe text',
+      options.status ?? 'needs_review', JSON.stringify(options.candidates ?? [candidate('First'), candidate('Second')]),
+      options.expiresAt ?? now + 60_000, now, now).run();
+  return id;
+}
+const recipeInput = (title: string) => ({ title, baseServings: null, sourceLabel: 'Edited label', sourceUrl: null,
+  steps: ['Edited step'], ingredients: [], uploads: [] });
 
 beforeAll(async () => {
   const migrationEnv = env as typeof env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
@@ -84,6 +97,132 @@ beforeAll(async () => {
 });
 
 describe('authenticated recipe routes with D1', () => {
+  it('saves immutable source snapshots for selected and manual candidates and omits them from lists', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const importId = await seedImport(owner!.id);
+    const response = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Imported one'),
+      importSource: { importId, candidateIndex: 1 } }, memberCookie), testEnv);
+    expect(response?.status).toBe(201);
+    const recipe = (await response!.json() as { recipe: { id: string; sourceSnapshot: unknown } }).recipe;
+    expect(recipe.sourceSnapshot).toMatchObject({ kind: 'text', sourceLabel: 'Original label', sourceText: 'Original recipe text',
+      selectedCandidate: { title: 'Second' } });
+    expect(await db.prepare(`SELECT status FROM imports WHERE id=?`).bind(importId).first()).toEqual({ status: 'saved' });
+    const listed = await handleRecipes(request('/api/recipes', 'GET', undefined, memberCookie), testEnv);
+    const listRecipe = (await listed!.json() as { recipes: Record<string, unknown>[] }).recipes.find(item => item.id === recipe.id)!;
+    expect(Object.hasOwn(listRecipe, 'sourceSnapshot')).toBe(false);
+    const detail = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'GET', undefined, memberCookie), testEnv);
+    expect((await detail!.json() as { recipe: { sourceSnapshot: unknown } }).recipe.sourceSnapshot).toMatchObject({ selectedCandidate: { title: 'Second' } });
+
+    const manual = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'PUT', { ...recipeInput('Edited again'), expectedVersion: 1 }, memberCookie), testEnv);
+    expect(manual?.status).toBe(200);
+    expect((await manual!.json() as { recipe: { sourceSnapshot: unknown } }).recipe.sourceSnapshot).toMatchObject({ selectedCandidate: { title: 'Second' } });
+    const rejectedRewrite = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'PUT', {
+      ...recipeInput('Cannot rewrite'), expectedVersion: 2, importSource: { importId, candidateIndex: 0 },
+    }, memberCookie), testEnv);
+    expect(rejectedRewrite?.status).toBe(400);
+    expect(JSON.parse((await db.prepare(`SELECT selected_candidate_json AS candidate FROM recipe_sources WHERE recipe_id=?`)
+      .bind(recipe.id).first<{ candidate: string }>())!.candidate)).toMatchObject({ title: 'Second' });
+
+    const failedImport = await seedImport(owner!.id, { status: 'failed', candidates: [], sourceText: 'Hand-edited source' });
+    const fallback = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Manual fallback'),
+      importSource: { importId: failedImport, candidateIndex: null } }, memberCookie), testEnv);
+    expect(fallback?.status).toBe(201);
+    expect((await fallback!.json() as { recipe: { sourceSnapshot: unknown } }).recipe.sourceSnapshot)
+      .toMatchObject({ sourceText: 'Hand-edited source', selectedCandidate: null });
+
+    // A saved import remains usable for another candidate until its original expiry.
+    const secondSave = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Imported two'),
+      importSource: { importId, candidateIndex: 0 } }, memberCookie), testEnv);
+    expect(secondSave?.status).toBe(201);
+    expect((await secondSave!.json() as { recipe: { sourceSnapshot: { selectedCandidate: { title: string } } } }).recipe.sourceSnapshot.selectedCandidate.title).toBe('First');
+  });
+
+  it('rejects foreign, expired, nonready, and out-of-range import sources', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const admin = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(adminEmail).first<{ id: string }>();
+    const foreign = await seedImport(admin!.id);
+    const expired = await seedImport(owner!.id, { expiresAt: Date.now() - 1 });
+    const queued = await seedImport(owner!.id, { status: 'queued' });
+    const source = (importId: string, candidateIndex: number | null) => ({ ...recipeInput('Rejected import'), importSource: { importId, candidateIndex } });
+    for (const [payload, status, code] of [
+      [source(foreign, 0), 404, 'IMPORT_NOT_FOUND'], [source(expired, 0), 409, 'IMPORT_EXPIRED'],
+      [source(queued, 0), 409, 'IMPORT_NOT_READY'], [source(await seedImport(owner!.id), 2), 400, 'INVALID_IMPORT_CANDIDATE'],
+    ] as const) {
+      const response = await handleRecipes(request('/api/recipes', 'POST', payload, memberCookie), testEnv);
+      expect(response?.status).toBe(status);
+      expect(await response!.json()).toMatchObject({ error: { code } });
+    }
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipes WHERE owner_id=? AND title='Rejected import'`).bind(owner!.id).first())
+      .toEqual({ count: 0 });
+  });
+
+  it('deletes only the owner source with a live session and soft deletion removes snapshots', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const importId = await seedImport(owner!.id);
+    const created = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Source deletion'),
+      importSource: { importId, candidateIndex: 0 } }, memberCookie), testEnv);
+    const { recipe } = await created!.json() as { recipe: { id: string } };
+    expect((await handleRecipes(request(`/api/recipes/${recipe.id}/source`, 'DELETE', undefined, adminCookie), testEnv))?.status).toBe(404);
+    const blocked = await handleRecipes(request(`/api/recipes/${recipe.id}/source`, 'DELETE', undefined, memberCookie), testEnv, {
+      beforeWrite: async () => { await db.prepare(`UPDATE app_accounts SET status='blocked' WHERE id=?`).bind(owner!.id).run(); },
+    });
+    expect(blocked?.status).toBe(403);
+    await db.prepare(`UPDATE app_accounts SET status='active' WHERE id=?`).bind(owner!.id).run();
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_sources WHERE recipe_id=?`).bind(recipe.id).first()).toEqual({ count: 1 });
+    const session = await db.prepare(`SELECT session_id AS id FROM session_metadata WHERE owner_id=? AND revoked_at IS NULL LIMIT 1`)
+      .bind(owner!.id).first<{ id: string }>();
+    const revoked = await handleRecipes(request(`/api/recipes/${recipe.id}/source`, 'DELETE', undefined, memberCookie), testEnv, {
+      beforeWrite: async () => { await db.prepare(`UPDATE session_metadata SET revoked_at=? WHERE session_id=?`).bind(Date.now(), session!.id).run(); },
+    });
+    expect(revoked?.status).toBe(401);
+    await db.prepare(`UPDATE session_metadata SET revoked_at=NULL WHERE session_id=?`).bind(session!.id).run();
+    const detached = await handleRecipes(request(`/api/recipes/${recipe.id}/source`, 'DELETE', undefined, memberCookie), testEnv);
+    expect(detached?.status).toBe(204);
+    expect(await db.prepare(`SELECT title FROM recipes WHERE id=?`).bind(recipe.id).first()).toEqual({ title: 'Source deletion' });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_sources WHERE recipe_id=?`).bind(recipe.id).first()).toEqual({ count: 0 });
+
+    const recreate = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Soft deleted source'),
+      importSource: { importId, candidateIndex: 1 } }, memberCookie), testEnv);
+    expect(recreate?.status).toBe(201);
+    const { recipe: recreated } = await recreate!.json() as { recipe: { id: string } };
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_sources WHERE recipe_id=?`).bind(recreated.id).first()).toEqual({ count: 1 });
+    const softDeleted = await handleRecipes(request(`/api/recipes/${recreated.id}`, 'DELETE', undefined, memberCookie), testEnv);
+    expect(softDeleted?.status).toBe(204);
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_sources WHERE recipe_id=?`).bind(recreated.id).first()).toEqual({ count: 0 });
+  });
+
+  it('does not create a recipe when import expiry or account access changes before the batch', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const expiring = await seedImport(owner!.id);
+    const expired = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Expiry race'),
+      importSource: { importId: expiring, candidateIndex: 0 } }, memberCookie), testEnv, {
+      now: () => Date.now(), beforeWrite: async () => {
+        await db.prepare(`UPDATE imports SET expires_at=? WHERE id=?`).bind(Date.now() - 1, expiring).run();
+      },
+    });
+    expect(expired?.status).toBe(409);
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipes WHERE title='Expiry race'`).first()).toEqual({ count: 0 });
+
+    let clock = Date.now();
+    const clockBound = await seedImport(owner!.id, { expiresAt: clock + 500 });
+    const elapsed = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Clock expiry race'),
+      importSource: { importId: clockBound, candidateIndex: 0 } }, memberCookie), testEnv, {
+      now: () => clock, beforeWrite: async () => { clock += 1_000; },
+    });
+    expect(elapsed?.status).toBe(409);
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipes WHERE title='Clock expiry race'`).first()).toEqual({ count: 0 });
+
+    const blockedImport = await seedImport(owner!.id);
+    const blocked = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Blocked source race'),
+      importSource: { importId: blockedImport, candidateIndex: 0 } }, memberCookie), testEnv, {
+      beforeWrite: async () => { await db.prepare(`UPDATE app_accounts SET status='blocked' WHERE id=?`).bind(owner!.id).run(); },
+    });
+    expect(blocked?.status).toBe(403);
+    await db.prepare(`UPDATE app_accounts SET status='active' WHERE id=?`).bind(owner!.id).run();
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipes WHERE title='Blocked source race'`).first()).toEqual({ count: 0 });
+    expect(await db.prepare(`SELECT status FROM imports WHERE id=?`).bind(blockedImport).first()).toEqual({ status: 'needs_review' });
+  });
+
   it('stores exact quantities, hides other owners, CAS-updates content, and keeps proposal history', async () => {
     const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
     const uploadId = await createStoredUpload(owner!.id);

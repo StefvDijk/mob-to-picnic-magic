@@ -23,4 +23,14 @@ describe('exact shared quantities', () => {
     expect(parseQuantity({ kind: 'exact', amount: '1', unit: 'piece', basis: 'drained' })).toBeNull();
     expect(parseQuantity({ kind: 'global', extra: true })).toBeNull();
   });
+
+  it('round-trips unknown and global quantities without assigning a measurement basis', () => {
+    for (const kind of ['unknown', 'global']) {
+      const normalized = parseQuantity({ kind });
+      expect(normalized).toEqual({ kind, basis: null });
+      expect(parseQuantity(JSON.parse(JSON.stringify(normalized)))).toEqual(normalized);
+      expect(parseQuantity({ kind, basis: 'net' })).toBeNull();
+      expect(parseQuantity({ kind, amount: '1' })).toBeNull();
+    }
+  });
 });

@@ -282,10 +282,8 @@ async function applyRetention(db: D1Database, now: number, result: MaintenanceRe
     releasedInvitations += 1;
   }
   const statements: D1PreparedStatement[] = [
-    db.prepare(`DELETE FROM imports WHERE status IN ('queued','needs_review','failed','expired') AND updated_at<=?
-      AND NOT EXISTS(SELECT 1 FROM recipes r WHERE r.owner_id=imports.owner_id AND r.source_url=imports.source_url
-        AND imports.source_url IS NOT NULL AND r.created_at>=imports.created_at)`)
-      .bind(now - 7 * DAY),
+    db.prepare(`DELETE FROM imports WHERE (expires_at IS NOT NULL AND expires_at<=?)
+      OR (expires_at IS NULL AND created_at<=?)`).bind(now, now - 7 * DAY),
     db.prepare(`DELETE FROM feedback WHERE expires_at<=? OR consented_at<=?`).bind(now, now - 90 * DAY),
     db.prepare(`DELETE FROM actions WHERE created_at<=? AND state IN ('succeeded','stopped','resolved','partial')
       AND NOT EXISTS(SELECT 1 FROM execution_lines e WHERE e.owner_id=actions.owner_id AND e.action_id=actions.id

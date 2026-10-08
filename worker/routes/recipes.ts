@@ -1,6 +1,7 @@
 import { requirePrincipal, type AuthEnv, type Principal } from '../auth';
 import { formatRational, parseQuantity, parseRational, type Quantity } from '../../shared/quantities';
 import type { RecipeDto, RecipeIngredientDto } from '../../shared/recipes';
+import type { ImportCandidate } from '../../shared/imports';
 import { getSessionAccess, sessionExpiryMillisSql } from '../db';
 
 const NO_STORE = { 'Cache-Control': 'no-store, private', Pragma: 'no-cache' };
@@ -11,7 +12,8 @@ const MAX_STEPS = 100;
 type IngredientInput = Omit<RecipeIngredientDto, 'id' | 'ordinal'>;
 export interface RecipeRouteDependencies {
   /** Optional deterministic seam for exercising state changes between auth and the write transaction. */
-  beforeWrite?: (kind: 'create' | 'update' | 'delete') => Promise<void>;
+  beforeWrite?: (kind: 'create' | 'update' | 'delete' | 'delete-source') => Promise<void>;
+  now?: () => number;
 }
 const liveSessionSql = `EXISTS(SELECT 1 FROM app_accounts a
   JOIN session_metadata sm ON sm.owner_id=a.id
@@ -36,6 +38,15 @@ type RecipeRow = {
   id: string; title: string; sourceLabel: string | null; sourceUrl: string | null;
   baseServingsNum: number | null; baseServingsDen: number; version: number;
   stepsJson: string; createdAt: number; updatedAt: number;
+};
+type RecipeSourceRow = {
+  sourceKind: 'text' | 'url' | 'upload'; sourceLabel: string | null; sourceUrl: string | null;
+  sourceText: string | null; selectedCandidateJson: string | null; importedAt: number;
+};
+type ImportSourceRow = {
+  id: string; sourceKind: 'text' | 'url' | 'upload'; sourceLabel: string | null; sourceTitle: string | null;
+  sourceUrl: string | null; sourceText: string | null; status: string; resultJson: string;
+  expiresAt: number | null; createdAt: number;
 };
 type IngredientRow = {
   id: string; ordinal: number; section: string | null; originalText: string; normalizedName: string | null;
@@ -150,13 +161,13 @@ function publicAttributes(raw: string): Record<string, unknown> {
   const { quantityBasis: _basis, ...attributes } = safeObject(raw);
   return attributes;
 }
-async function loadRecipe(env: AuthEnv, ownerId: string, id: string): Promise<RecipeDto | null> {
+async function loadRecipe(env: AuthEnv, ownerId: string, id: string, includeSource = true): Promise<RecipeDto | null> {
   const row = await env.DB.prepare(`SELECT id,title,source_label AS sourceLabel,source_url AS sourceUrl,
     base_servings_num AS baseServingsNum,base_servings_den AS baseServingsDen,version,steps_json AS stepsJson,
     created_at AS createdAt,updated_at AS updatedAt FROM recipes WHERE owner_id=? AND id=? AND deleted_at IS NULL`)
     .bind(ownerId, id).first<RecipeRow>();
   if (!row) return null;
-  const [ingredients, uploads] = await Promise.all([
+  const [ingredients, uploads, source] = await Promise.all([
     env.DB.prepare(`SELECT id,ordinal,section,original_text AS originalText,normalized_name AS normalizedName,
       quantity_kind AS quantityKind,quantity_num AS quantityNum,quantity_den AS quantityDen,
       quantity_max_num AS quantityMaxNum,unit,source_origin AS sourceOrigin,attributes_json AS attributesJson,
@@ -164,6 +175,9 @@ async function loadRecipe(env: AuthEnv, ownerId: string, id: string): Promise<Re
       .bind(ownerId, id).all<IngredientRow>(),
     env.DB.prepare(`SELECT ru.upload_id AS id FROM recipe_uploads ru JOIN uploads u ON u.owner_id=ru.owner_id AND u.id=ru.upload_id
       WHERE ru.owner_id=? AND ru.recipe_id=? AND u.status='stored' ORDER BY ru.upload_id`).bind(ownerId, id).all<{ id: string }>(),
+    includeSource ? env.DB.prepare(`SELECT source_kind AS sourceKind,source_label AS sourceLabel,source_url AS sourceUrl,
+      source_text AS sourceText,selected_candidate_json AS selectedCandidateJson,imported_at AS importedAt
+      FROM recipe_sources WHERE owner_id=? AND recipe_id=?`).bind(ownerId, id).first<RecipeSourceRow>() : Promise.resolve(null),
   ]);
   return { id: row.id, title: row.title, sourceLabel: row.sourceLabel, sourceUrl: row.sourceUrl,
     baseServings: row.baseServingsNum === null ? null : formatRational({ numerator: row.baseServingsNum, denominator: row.baseServingsDen }),
@@ -172,7 +186,16 @@ async function loadRecipe(env: AuthEnv, ownerId: string, id: string): Promise<Re
       section: ingredient.section, originalText: ingredient.originalText, normalizedName: ingredient.normalizedName,
       quantity: rowQuantity(ingredient), sourceOrigin: ingredient.sourceOrigin, attributes: publicAttributes(ingredient.attributesJson),
       uncertainty: safeArray(ingredient.uncertaintyJson) })),
-    uploads: uploads.results, createdAt: row.createdAt, updatedAt: row.updatedAt };
+    uploads: uploads.results, ...(includeSource ? { sourceSnapshot: source ? {
+      kind: source.sourceKind, sourceLabel: source.sourceLabel, sourceUrl: source.sourceUrl,
+      sourceText: source.sourceText,
+      selectedCandidate: parseCandidate(source.selectedCandidateJson), importedAt: source.importedAt,
+    } : null } : {}), createdAt: row.createdAt, updatedAt: row.updatedAt };
+}
+function parseCandidate(raw: string | null): ImportCandidate | null {
+  if (!raw) return null;
+  try { const value: unknown = JSON.parse(raw); return value && typeof value === 'object' && !Array.isArray(value) ? value as ImportCandidate : null; }
+  catch { return null; }
 }
 async function uploadsAreOwnedAndStored(env: AuthEnv, ownerId: string, ids: string[]): Promise<boolean> {
   if (!ids.length) return true;
@@ -196,19 +219,86 @@ function servingsColumns(value: string | null): { num: number | null; den: numbe
   const rational = value ? parseRational(value)! : null;
   return { num: rational?.numerator ?? null, den: rational?.denominator ?? 1 };
 }
+function parseImportSource(value: unknown): { importId: string; candidateIndex: number | null } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (typeof input.importId !== 'string' || !input.importId.trim() || input.importId.length > 100 ||
+      !(input.candidateIndex === null || (Number.isSafeInteger(input.candidateIndex) && (input.candidateIndex as number) >= 0 && (input.candidateIndex as number) <= 29))) return null;
+  return { importId: input.importId, candidateIndex: input.candidateIndex as number | null };
+}
+function candidateAt(raw: string, index: number): ImportCandidate | null {
+  try {
+    const candidates: unknown = JSON.parse(raw);
+    if (!Array.isArray(candidates)) return null;
+    const candidate = candidates[index];
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+    const item = candidate as Record<string, unknown>;
+    const nullableText = (value: unknown) => value === null || typeof value === 'string';
+    if (!nullableText(item.title) || !nullableText(item.sourceTitle) || !nullableText(item.sourceUrl) ||
+        !nullableText(item.baseServings) || !Array.isArray(item.sections) || !item.sections.every(x => typeof x === 'string') ||
+        !Array.isArray(item.steps) || !item.steps.every(x => typeof x === 'string') ||
+        !Array.isArray(item.uncertainty) || !item.uncertainty.every(x => typeof x === 'string') || !Array.isArray(item.ingredients) ||
+        !item.ingredients.every(entry => !!entry && typeof entry === 'object' && !Array.isArray(entry) &&
+          nullableText((entry as Record<string, unknown>).section) && typeof (entry as Record<string, unknown>).originalText === 'string')) return null;
+    return candidate as ImportCandidate;
+  } catch { return null; }
+}
+async function validateImportSource(env: AuthEnv, ownerId: string, source: { importId: string; candidateIndex: number | null }, now: number): Promise<{ row: ImportSourceRow; candidate: ImportCandidate | null } | Response> {
+  const row = await env.DB.prepare(`SELECT id,source_kind AS sourceKind,source_label AS sourceLabel,source_title AS sourceTitle,
+    source_url AS sourceUrl,source_text AS sourceText,status,result_json AS resultJson,expires_at AS expiresAt,created_at AS createdAt
+    FROM imports WHERE id=? AND owner_id=?`).bind(source.importId, ownerId).first<ImportSourceRow>();
+  if (!row) return fail(404, 'IMPORT_NOT_FOUND', 'Import niet gevonden.');
+  if (row.status === 'expired' || row.expiresAt === null || row.expiresAt <= now) return fail(409, 'IMPORT_EXPIRED', 'Deze import is verlopen.');
+  if (row.status === 'queued' || row.status === 'running') return fail(409, 'IMPORT_NOT_READY', 'Deze import is nog niet klaar.');
+  if (source.candidateIndex === null) {
+    if (!['needs_review', 'failed', 'saved'].includes(row.status)) return fail(400, 'INVALID_IMPORT_CANDIDATE', 'Kies een geldig importresultaat.');
+    return { row, candidate: null };
+  }
+  if (!['needs_review', 'saved'].includes(row.status)) return fail(400, 'INVALID_IMPORT_CANDIDATE', 'Kies een geldig importresultaat.');
+  const candidate = candidateAt(row.resultJson, source.candidateIndex);
+  if (!candidate) return fail(400, 'INVALID_IMPORT_CANDIDATE', 'Kies een geldig importresultaat.');
+  return { row, candidate };
+}
 async function createRecipe(request: Request, env: AuthEnv, principal: Principal, deps: RecipeRouteDependencies): Promise<Response> {
   const body = await readBody(request);
   const input = body && parseInput(body, true);
   if (!input) return fail(400, 'INVALID_RECIPE', 'Controleer de receptgegevens.');
+  const hasImportSource = !!body && Object.prototype.hasOwnProperty.call(body, 'importSource');
+  const importSource = hasImportSource ? parseImportSource(body!.importSource) : null;
+  if (hasImportSource && !importSource) return fail(400, 'INVALID_IMPORT_SOURCE', 'Ongeldige importverwijzing.');
+  let now = (deps.now ?? Date.now)();
+  const validatedSource = importSource ? await validateImportSource(env, principal.ownerId, importSource, now) : null;
+  if (validatedSource instanceof Response) return validatedSource;
   if (!(await uploadsAreOwnedAndStored(env, principal.ownerId, input.uploads))) return fail(400, 'INVALID_UPLOAD', 'Een bronafbeelding is niet beschikbaar.');
   await deps.beforeWrite?.('create');
-  const now = Date.now();
+  now = (deps.now ?? Date.now)();
+  const freshSource = importSource ? await validateImportSource(env, principal.ownerId, importSource, now) : null;
+  if (freshSource instanceof Response) return freshSource;
   const id = crypto.randomUUID();
   const servings = servingsColumns(input.baseServings);
-  const statements = [env.DB.prepare(`INSERT INTO recipes(id,owner_id,title,source_label,source_url,base_servings_num,base_servings_den,version,steps_json,created_at,updated_at)
-    SELECT ?,?,?,?,?,?,?,1,?,?,? WHERE ${liveSessionSql}`)
+  const sourceStatement = validatedSource && importSource ? env.DB.prepare(`INSERT INTO recipe_sources(owner_id,recipe_id,import_id,candidate_index,source_kind,source_label,source_url,source_text,selected_candidate_json,imported_at)
+    SELECT ?,?,i.id,?,i.source_kind,COALESCE(i.source_label,i.source_title),i.source_url,
+      CASE WHEN i.source_kind='text' THEN i.source_text ELSE NULL END,
+      CASE WHEN ? IS NULL THEN NULL ELSE json_extract(i.result_json,'$['||CAST(? AS INTEGER)||']') END, i.created_at
+    FROM imports i WHERE i.id=? AND i.owner_id=? AND i.status IN (${importSource.candidateIndex === null ? "'needs_review','failed','saved'" : "'needs_review','saved'"})
+      AND i.expires_at>?${importSource.candidateIndex === null ? '' : " AND json_type(i.result_json,'$['||CAST(? AS INTEGER)||']')='object'"}
+      AND ${liveSessionSql}`)
+    .bind(principal.ownerId, id, importSource.candidateIndex, importSource.candidateIndex, importSource.candidateIndex,
+      importSource.importId, principal.ownerId, now,
+      ...(importSource.candidateIndex === null ? [] : [importSource.candidateIndex]),
+      ...sessionArgs(principal, now)) : null;
+  const recipeStatement = env.DB.prepare(`INSERT INTO recipes(id,owner_id,title,source_label,source_url,base_servings_num,base_servings_den,version,steps_json,created_at,updated_at)
+    SELECT ?,?,?,?,?,?,?,1,?,?,? WHERE ${liveSessionSql}${importSource ? " AND EXISTS(SELECT 1 FROM recipe_sources rs WHERE rs.owner_id=? AND rs.recipe_id=? AND rs.import_id=?)" : ''}`)
     .bind(id, principal.ownerId, input.title, input.sourceLabel, input.sourceUrl,
-      servings.num, servings.den, JSON.stringify(input.steps), now, now, ...sessionArgs(principal, now)),
+      servings.num, servings.den, JSON.stringify(input.steps), now, now, ...sessionArgs(principal, now),
+      ...(importSource ? [principal.ownerId, id, importSource.importId] : []));
+  const saveImportStatement = validatedSource && importSource ? env.DB.prepare(`UPDATE imports SET status='saved',updated_at=? WHERE id=? AND owner_id=?
+    AND EXISTS(SELECT 1 FROM recipes r JOIN recipe_sources rs ON rs.owner_id=r.owner_id AND rs.recipe_id=r.id
+      WHERE r.owner_id=? AND r.id=? AND r.deleted_at IS NULL AND rs.import_id=?) AND ${liveSessionSql}`)
+    .bind(now, importSource.importId, principal.ownerId, principal.ownerId, id, importSource.importId, ...sessionArgs(principal, now)) : null;
+  const statements = [
+  ...(sourceStatement ? [sourceStatement] : []), recipeStatement,
+  ...(saveImportStatement ? [saveImportStatement] : []),
   ...input.ingredients.map((item, index) => insertIngredient(env, principal.ownerId, id, item, index, now)),
   ...input.uploads.map(uploadId => env.DB.prepare(`INSERT INTO recipe_uploads(owner_id,recipe_id,upload_id)
     SELECT ?,?,u.id FROM uploads u JOIN recipes r ON r.owner_id=u.owner_id AND r.id=? JOIN app_accounts a ON a.id=r.owner_id
@@ -217,12 +307,24 @@ async function createRecipe(request: Request, env: AuthEnv, principal: Principal
   let results: D1Result[];
   try { results = await env.DB.batch(statements); }
   catch { return fail(400, 'INVALID_RECIPE', 'Controleer de receptgegevens.'); }
-  if (results[0]?.meta.changes !== 1) return await accessFailure(env, principal) ?? fail(409, 'WRITE_CONFLICT', 'Het recept kon niet worden bewaard.');
+  const recipeIndex = sourceStatement ? 1 : 0;
+  if (results[recipeIndex]?.meta.changes !== 1) {
+    const denied = await accessFailure(env, principal);
+    if (denied) return denied;
+    if (importSource) {
+      const revalidated = await validateImportSource(env, principal.ownerId, importSource, (deps.now ?? Date.now)());
+      if (revalidated instanceof Response) return revalidated;
+      return fail(409, 'IMPORT_NOT_READY', 'Deze import kan niet meer worden opgeslagen.');
+    }
+    return fail(409, 'WRITE_CONFLICT', 'Het recept kon niet worden bewaard.');
+  }
+  if (validatedSource && results[2]?.meta.changes !== 1) return await accessFailure(env, principal) ?? fail(409, 'IMPORT_NOT_READY', 'Deze import kan niet meer worden opgeslagen.');
   const recipe = await loadRecipe(env, principal.ownerId, id);
   return json({ recipe }, 201);
 }
 async function updateRecipe(request: Request, env: AuthEnv, principal: Principal, id: string, deps: RecipeRouteDependencies): Promise<Response> {
   const body = await readBody(request);
+  if (body && Object.prototype.hasOwnProperty.call(body, 'importSource')) return fail(400, 'INVALID_IMPORT_SOURCE', 'De bron van een recept kan niet worden gewijzigd.');
   const expectedVersion = body?.expectedVersion;
   const input = body && parseInput(body, true);
   if (!input || !Number.isSafeInteger(expectedVersion) || (expectedVersion as number) <= 0) {
@@ -295,7 +397,7 @@ async function listRecipes(request: Request, env: AuthEnv, principal: Principal)
     .all<RecipeRow>();
   const more = rows.results.length > limit;
   const page = rows.results.slice(0, limit);
-  const recipes = await Promise.all(page.map(row => loadRecipe(env, principal.ownerId, row.id)));
+  const recipes = await Promise.all(page.map(row => loadRecipe(env, principal.ownerId, row.id, false)));
   const last = page.at(-1);
   return json({ recipes: recipes.filter((recipe): recipe is RecipeDto => recipe !== null),
     nextCursor: more && last ? encodeCursor(last.updatedAt, last.id) : null });
@@ -330,14 +432,31 @@ async function deleteRecipe(env: AuthEnv, principal: Principal, id: string, deps
   env.DB.prepare(`DELETE FROM recipe_uploads WHERE owner_id=? AND recipe_id=? AND ${ownsDeletion}`)
     .bind(principal.ownerId, id, ...ownsArgs)];
   const results = await env.DB.batch(statements);
-  if (results[0]?.meta.changes !== 1) return await accessFailure(env, principal) ?? fail(404, 'NOT_FOUND', 'Niet gevonden.');
+  if (!results[0]?.meta.changes) return await accessFailure(env, principal) ?? fail(404, 'NOT_FOUND', 'Niet gevonden.');
+  return new Response(null, { status: 204, headers: NO_STORE });
+}
+async function deleteRecipeSource(env: AuthEnv, principal: Principal, id: string, deps: RecipeRouteDependencies): Promise<Response> {
+  await deps.beforeWrite?.('delete-source');
+  const now = (deps.now ?? Date.now)();
+  const result = await env.DB.prepare(`DELETE FROM recipe_sources WHERE owner_id=? AND recipe_id=?
+    AND EXISTS(SELECT 1 FROM recipes r WHERE r.owner_id=? AND r.id=? AND r.deleted_at IS NULL)
+    AND ${liveSessionSql}`)
+    .bind(principal.ownerId, id, principal.ownerId, id, ...sessionArgs(principal, now)).run();
+  if (result.meta.changes !== 1) {
+    const denied = await accessFailure(env, principal);
+    if (denied) return denied;
+    const recipe = await env.DB.prepare(`SELECT 1 FROM recipes WHERE owner_id=? AND id=? AND deleted_at IS NULL`)
+      .bind(principal.ownerId, id).first();
+    return recipe ? fail(404, 'SOURCE_NOT_FOUND', 'Bron niet gevonden.') : fail(404, 'NOT_FOUND', 'Niet gevonden.');
+  }
   return new Response(null, { status: 204, headers: NO_STORE });
 }
 
 /** Returns null for paths owned by another route module. */
 export async function handleRecipes(request: Request, env: AuthEnv, deps: RecipeRouteDependencies = {}): Promise<Response | null> {
   const path = new URL(request.url).pathname;
-  const known = path === '/api/recipes' || /^\/api\/recipes\/[^/]+$/.test(path);
+  const sourcePath = /^\/api\/recipes\/[^/]+\/source$/.test(path);
+  const known = path === '/api/recipes' || /^\/api\/recipes\/[^/]+$/.test(path) || sourcePath;
   if (!known) return null;
   if (request.method !== 'GET') {
     const denied = requireOrigin(request, env);
@@ -351,8 +470,12 @@ export async function handleRecipes(request: Request, env: AuthEnv, deps: Recipe
     return fail(405, 'METHOD_NOT_ALLOWED', 'Deze handeling is niet beschikbaar.');
   }
   let id: string;
-  try { id = decodeURIComponent(path.slice('/api/recipes/'.length)); }
+  try { id = decodeURIComponent(path.slice('/api/recipes/'.length, sourcePath ? -'/source'.length : undefined)); }
   catch { return fail(400, 'INVALID_ID', 'Ongeldige receptverwijzing.'); }
+  if (sourcePath) {
+    if (request.method !== 'DELETE') return fail(405, 'METHOD_NOT_ALLOWED', 'Deze handeling is niet beschikbaar.');
+    return deleteRecipeSource(env, principal, id, deps);
+  }
   if (request.method === 'GET') {
     const recipe = await loadRecipe(env, principal.ownerId, id);
     return recipe ? json({ recipe }) : fail(404, 'NOT_FOUND', 'Niet gevonden.');

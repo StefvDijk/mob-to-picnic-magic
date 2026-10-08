@@ -1,5 +1,6 @@
-import type { RecipeDto, RecipeIngredientDto } from '../../shared/recipes';
+import type { RecipeDto, RecipeIngredientDto, RecipeImportSourceInput } from '../../shared/recipes';
 import type { PicnicCart, PicnicConnectResponse, PicnicConnectionDto, PicnicProduct } from '../../shared/picnic';
+import type { ImportDto } from '../../shared/imports';
 
 export type { RecipeDto, RecipeIngredientDto };
 
@@ -25,6 +26,7 @@ export interface RecipeInputDto {
   steps: string[];
   ingredients: Omit<RecipeIngredientDto, 'id' | 'ordinal'>[];
   uploads: string[];
+  importSource?: RecipeImportSourceInput;
 }
 
 export interface AdminOverviewDto {
@@ -80,6 +82,7 @@ export const api = {
   createRecipe: (input: RecipeInputDto) => request<{ recipe: RecipeDto }>('/api/recipes', 'POST', input),
   updateRecipe: (id: string, expectedVersion: number, input: RecipeInputDto) => request<{ recipe: RecipeDto }>(`/api/recipes/${encodeURIComponent(id)}`, 'PUT', { ...input, expectedVersion }),
   deleteRecipe: (id: string) => request<void>(`/api/recipes/${encodeURIComponent(id)}`, 'DELETE'),
+  deleteRecipeSource: (id: string) => request<void>(`/api/recipes/${encodeURIComponent(id)}/source`, 'DELETE'),
   adminOverview: () => request<AdminOverviewDto>('/api/admin/overview'),
   invite: (email: string) => request<{ invitation: { id: string; email: string; status: string; expiresAt: number } }>('/api/admin/invitations', 'POST', { email }),
   revokeInvitation: (id: string) => request<void>(`/api/admin/invitations/${encodeURIComponent(id)}`, 'DELETE'),
@@ -90,4 +93,7 @@ export const api = {
   disconnectPicnic: () => request<void>('/api/picnic/connection', 'DELETE'),
   searchPicnicProducts: (query: string) => request<{ products: PicnicProduct[] }>(`/api/picnic/products?q=${encodeURIComponent(query)}`),
   picnicCart: () => request<{ cart: PicnicCart }>('/api/picnic/cart'),
+  importText: (text: string) => request<{ import: ImportDto }>('/api/imports', 'POST', { type: 'text', text }),
+  importUrl: (url: string, sourceLabel?: string) => request<{ import: ImportDto }>('/api/imports', 'POST', { type: 'url', url, ...(sourceLabel ? { sourceLabel } : {}) }),
+  getImport: (id: string) => request<{ import: ImportDto }>(`/api/imports/${encodeURIComponent(id)}`),
 };

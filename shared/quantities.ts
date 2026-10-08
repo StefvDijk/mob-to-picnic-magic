@@ -77,7 +77,8 @@ export function parseQuantity(input: unknown): Quantity | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const item = input as Record<string, unknown>;
   if (item.kind === 'global' || item.kind === 'unknown') {
-    return Object.keys(item).every(key => key === 'kind') ? { kind: item.kind, basis: null } : null;
+    return Object.keys(item).every(key => key === 'kind' || key === 'basis') && item.basis == null
+      ? { kind: item.kind, basis: null } : null;
   }
   if (item.kind !== 'exact' && item.kind !== 'range') return null;
   if (typeof item.unit !== 'string' || !['g', 'kg', 'ml', 'l', 'piece'].includes(item.unit) || !validBasis(item.basis)) return null;
