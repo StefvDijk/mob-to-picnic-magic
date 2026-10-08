@@ -37,12 +37,14 @@
     "consumers": [
       {
         "queue": "picnic-imports-local",
+        "dead_letter_queue": "picnic-imports-dead-local",
         "max_batch_size": 1,
         "max_batch_timeout": 5,
         "max_retries": 3
       },
       {
         "queue": "picnic-additions-local",
+        "dead_letter_queue": "picnic-additions-dead-local",
         "max_batch_size": 1,
         "max_batch_timeout": 5,
         "max_retries": 3
@@ -73,8 +75,8 @@
           { "binding": "ADD_QUEUE", "queue": "picnic-additions-test" }
         ],
         "consumers": [
-          { "queue": "picnic-imports-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
-          { "queue": "picnic-additions-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
+          { "queue": "picnic-imports-test", "dead_letter_queue": "picnic-imports-dead-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          { "queue": "picnic-additions-test", "dead_letter_queue": "picnic-additions-dead-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
         ]
       }
     },
@@ -103,8 +105,8 @@
           { "binding": "ADD_QUEUE", "queue": "picnic-additions-production" }
         ],
         "consumers": [
-          { "queue": "picnic-imports-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
-          { "queue": "picnic-additions-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
+          { "queue": "picnic-imports-production", "dead_letter_queue": "picnic-imports-dead-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          { "queue": "picnic-additions-production", "dead_letter_queue": "picnic-additions-dead-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
         ]
       }
     }

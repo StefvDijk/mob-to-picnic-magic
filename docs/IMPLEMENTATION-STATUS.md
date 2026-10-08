@@ -115,3 +115,11 @@ De laatste recipeDELETE/PUT-race is atomisch hersteld; de directeur herhaalde de
 De frontend gebruikt de eigen Picnic-API voor koppelen/vervangen, SMS-verificatie, ontkoppelen en alleen-lezen product-/mandweergave. De manager corrigeerde hervatbaarheid, vernieuwde accountstatus, achterhaalde antwoorden na vervanging en toetsenbordfocus. De directeur herhaalde frontend-TypeScript en de productiebuild; beide groen.
 
 De lokale browserproef gebruikt uitsluitend een fictieve account en een tijdelijke onbruikbare SMS-status, zonder Picnic te benaderen. Gecontroleerd: popup opent met focus op het eerste veld, sluiten wist ingevulde testcredentials, heropenen toont lege velden, focus keert terug naar de opener, en SMS is na paginaherladen hervatbaar zonder nieuwe sms-aanvraag. Op 320px breedte zijn document en scrollbreedte beide 320px; de dialoog past. De teststatus is opgeruimd, de testaccount uitgelogd en de viewport hersteld. Echte Picnic-authenticatie en de live product-/mandgegevens blijven afzonderlijke pilotproeven.
+
+### Importbasis — duurzame verwerking en lokale keten bewezen
+
+Migratie 0008, eigenaargebonden importroutes, begrensde extractie van gestructureerde Culy/MOB-bronnen en ID-only outbox/queueverwerking zijn aangesloten. Expliciete betaalmuurmarkeringen blokkeren extractie; afgekorte of te complexe bronnen worden gemarkeerd. Dubbele berichten, verlopen leases, achtergebleven verzending en late resultaten zijn getest. Onbekende berichttypen worden niet bevestigd; iedere queue heeft een afzonderlijk geconfigureerde dead-letterqueue.
+
+De backendmanager controleerde zijn uitvoerder en herhaalde 11 gerichte import-/queueproeven. De directeur draaide daarna **88/88 tests in 16 bestanden**, plus Worker-typechecking. De lokale ontwikkeltestdatabase is gemigreerd tot 0008. Een afzonderlijke HTTP-proef via de draaiende Vite/Worker-app gaf POST 202, werkelijke lokale queueverwerking en daarna GET `needs_review` met ongewijzigde fictieve brontekst. De tijdelijke testsessie is uitgelogd; er zijn geen Picnic- of AI-aanroepen gedaan.
+
+Deze eerste tekstpass claimt geen automatische herkenning: geplakte tekst blijft zichtbaar om te controleren. Volgende stappen zijn de importeditor, een blijvende zelfstandige bronkopie bij receptopslag (0009), AI-herkenning en foto-upload. De volledige MVP is daarmee nog niet afgerond.

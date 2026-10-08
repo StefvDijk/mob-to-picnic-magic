@@ -5,6 +5,9 @@ import { boundedRequest, privateApiResponse } from './http';
 import { handlePicnic, type PicnicDependencies } from './routes/picnic';
 import type { PicnicKeyEnv } from './security/credentials';
 import { runMaintenance } from './jobs/maintenance';
+import { handleImports } from './routes/imports';
+import { dispatchImportOutbox } from './imports/outbox';
+import { handleQueue } from './queue';
 
 /** Test mail injection is explicitly rejected by the auth module in production. */
 export async function handleRequest(request: Request, env: AuthEnv & PicnicKeyEnv, deps: AuthDependencies & PicnicDependencies = {}): Promise<Response> {
@@ -13,12 +16,14 @@ export async function handleRequest(request: Request, env: AuthEnv & PicnicKeyEn
     if (request.method === "GET" && url.pathname === "/api/health") {
       return privateApiResponse(Response.json({ status: "ok", service: "picnic" }));
     }
-    const bounded = await boundedRequest(request, url.pathname.startsWith('/api/recipes') ? 256 * 1024 : 8 * 1024);
+    const largeBody = url.pathname.startsWith('/api/recipes') || url.pathname === '/api/imports';
+    const bounded = await boundedRequest(request, largeBody ? 256 * 1024 : 8 * 1024);
     if (bounded instanceof Response) return privateApiResponse(bounded);
     const response = await handleAuth(bounded, env, deps)
       ?? await handleAccounts(bounded, env, deps)
       ?? await handleRecipes(bounded, env)
       ?? await handlePicnic(bounded, env, deps)
+      ?? await handleImports(bounded, env)
       ?? Response.json({ error: { code: 'NOT_FOUND', message: 'Niet gevonden.' } }, { status: 404 });
     return privateApiResponse(response);
   } catch {
@@ -30,10 +35,18 @@ export async function handleRequest(request: Request, env: AuthEnv & PicnicKeyEn
 }
 
 export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return handleRequest(request, env);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const response = await handleRequest(request, env);
+    if (request.method === 'POST' && new URL(request.url).pathname === '/api/imports' && response.status === 202) {
+      // The outbox was committed before the response; cron also recovers a failed immediate dispatch.
+      ctx.waitUntil(dispatchImportOutbox(env));
+    }
+    return response;
   },
   scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
-    ctx.waitUntil(runMaintenance(env));
+    ctx.waitUntil(Promise.all([runMaintenance(env), dispatchImportOutbox(env)]));
+  },
+  queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    return handleQueue(batch, env);
   },
 };
