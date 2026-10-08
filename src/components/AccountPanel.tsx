@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { PicnicPanel } from '@/components/PicnicPanel';
 
 interface AccountPanelProps {
   me: MeDto;
@@ -59,11 +60,7 @@ export function AccountPanel({ me, onRefresh, onSignedOut }: AccountPanelProps) 
         </div>
       </section>
 
-      <section className="panel" aria-labelledby="picnic-title">
-        <h2 id="picnic-title">Picnic-koppeling</h2>
-        <p className="subtle">Status: {me.picnic.status === 'connected' ? 'verbonden' : 'niet verbonden'}.</p>
-        <p className="subtle">Koppelen en boodschappen toevoegen worden in een volgende bouwstap beschikbaar. Je kunt nu al recepten bewaren.</p>
-      </section>
+      <PicnicPanel me={me} onRefresh={onRefresh} />
 
       <section className="panel danger-panel" aria-labelledby="delete-title">
         <h2 id="delete-title">Account verwijderen</h2>

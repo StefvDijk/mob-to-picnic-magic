@@ -216,7 +216,7 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
       {selected.uploads.length > 0 && <p className="recipe-meta">{selected.uploads.length} bronafbeelding(en) gekoppeld</p>}
       <div className="recipe-detail-columns"><section><h3>Ingrediënten</h3>{selected.ingredients.length ? <ul className="ingredient-list">{selected.ingredients.map(item => <li key={item.id}><span>{formatQuantity(item.quantity)}</span><strong>{item.originalText}</strong>{item.uncertainty.length > 0 && <small>{item.uncertainty.join(' · ')}</small>}</li>)}</ul> : <p className="subtle">Nog geen ingrediënten toegevoegd.</p>}</section>
         <section><h3>Bereiding</h3>{selected.steps.length ? <ol className="step-list">{selected.steps.map((step, index) => <li key={index}>{step}</li>)}</ol> : <p className="subtle">Nog geen bereidingsstappen toegevoegd.</p>}</section></div>
-      <div className="recipe-integrations"><h3>Verder met dit recept</h3><p>Receptimport en Picnic-koppeling zijn nog niet beschikbaar. Je kunt het recept hier wel bewaren en bewerken.</p></div>
+      <div className="recipe-integrations"><h3>Verder met dit recept</h3><p>Je kunt Picnic koppelen via Account. Receptimport, productvoorstellen en boodschappen toevoegen volgen nog.</p></div>
     </article>}
     {view === 'edit' && <form className="recipe-editor" onSubmit={save}>
       <div className="recipe-detail-top"><Button type="button" variant="ghost" onClick={() => setView(selected ? 'detail' : 'list')}>← Concept bewaren en terug</Button><p className="subtle">{selected ? 'Bewerk je recept' : 'Nieuw handmatig recept'}</p></div>

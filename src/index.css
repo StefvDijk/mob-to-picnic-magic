@@ -258,3 +258,28 @@ a { color: hsl(153 50% 27%); text-underline-offset: .2em; }
 .admin-list > li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #e7ebe4; border-radius: 10px; overflow-wrap: anywhere; }
 .switch-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; min-height: 48px; }
 .empty-small { padding: 14px; color: #687168; background: #f7f8f4; border-radius: 9px; }
+.picnic-panel-heading, .picnic-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.picnic-panel-heading h2, .picnic-section-heading h3 { margin: 0 0 5px; }
+.picnic-panel-heading .subtle, .picnic-section-heading .subtle { margin: 0; }
+.picnic-readonly { display: grid; gap: 16px; margin-top: 24px; padding-top: 22px; border-top: 1px solid #e7ebe4; }
+.picnic-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: end; }
+.picnic-search label { grid-column: 1 / -1; }
+.picnic-search input { min-width: 0; }
+.picnic-product-list { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.picnic-product-list li { display: grid; gap: 4px; min-width: 0; padding: 13px 14px; border: 1px solid #e1e5dd; border-radius: 11px; background: #fff; overflow-wrap: anywhere; }
+.picnic-product-list li span { color: #687168; font-size: .9rem; line-height: 1.45; }
+.picnic-cart-heading { align-items: end; margin-top: 8px; padding-top: 20px; border-top: 1px solid #e7ebe4; }
+.picnic-cart-count { margin: 0; }
+.picnic-resume { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid #e4d4ad; border-radius: 11px; background: #fff9eb; }
+.picnic-resume p { flex: 1 1 250px; margin: 0; line-height: 1.5; }
+.picnic-warning { margin: 0; padding: 12px; border: 1px solid #e4d4ad; border-radius: 9px; background: #fff9eb; color: #684b18; line-height: 1.5; }
+.picnic-dialog { width: min(100vw - 32px, 520px); max-height: min(88vh, 760px); overflow-y: auto; }
+.picnic-dialog .auth-card { width: 100%; padding: 0; border: 0; box-shadow: none; }
+.picnic-dialog .auth-card h1 { font-size: 1.25rem; }
+.picnic-dialog button { min-height: 44px; }
+@media (max-width: 520px) {
+  .picnic-panel-heading, .picnic-section-heading { align-items: stretch; flex-direction: column; }
+  .picnic-panel-heading > button, .picnic-panel-heading > [data-radix-collection-item], .picnic-cart-heading > button { width: 100%; }
+  .picnic-search { grid-template-columns: 1fr; }
+  .picnic-dialog { width: calc(100vw - 24px); max-height: 92vh; padding: 22px 18px; }
+}

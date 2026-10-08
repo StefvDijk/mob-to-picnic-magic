@@ -1,11 +1,12 @@
 import type { RecipeDto, RecipeIngredientDto } from '../../shared/recipes';
+import type { PicnicCart, PicnicConnectResponse, PicnicConnectionDto, PicnicProduct } from '../../shared/picnic';
 
 export type { RecipeDto, RecipeIngredientDto };
 
 export interface MeDto {
   account: { id: string; email: string; role: 'admin' | 'member'; status: string };
   session: { authenticatedAt: number; lastActivityAt: number; expiresAt: number; recentlyVerified: boolean };
-  picnic: { status: string };
+  picnic: PicnicConnectionDto & { verificationRequired: boolean };
   budgets: {
     month: string;
     user: BudgetDto;
@@ -84,4 +85,9 @@ export const api = {
   revokeInvitation: (id: string) => request<void>(`/api/admin/invitations/${encodeURIComponent(id)}`, 'DELETE'),
   setAccountStatus: (id: string, status: 'active' | 'blocked') => request<{ account: { id: string; status: string } }>(`/api/admin/accounts/${encodeURIComponent(id)}`, 'PATCH', { status }),
   setSwitches: (switches: { aiEnabled?: boolean; addEnabled?: boolean }) => request<{ aiEnabled: boolean; addEnabled: boolean }>('/api/admin/switches', 'PATCH', switches),
+  connectPicnic: (username: string, password: string) => request<PicnicConnectResponse>('/api/picnic/connect', 'POST', { username, password }),
+  verifyPicnic: (code: string) => request<{ connection: PicnicConnectionDto }>('/api/picnic/verify', 'POST', { code }),
+  disconnectPicnic: () => request<void>('/api/picnic/connection', 'DELETE'),
+  searchPicnicProducts: (query: string) => request<{ products: PicnicProduct[] }>(`/api/picnic/products?q=${encodeURIComponent(query)}`),
+  picnicCart: () => request<{ cart: PicnicCart }>('/api/picnic/cart'),
 };

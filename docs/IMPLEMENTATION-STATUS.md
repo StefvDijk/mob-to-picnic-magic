@@ -109,3 +109,9 @@ Volgende werkronde: Picnic-popup en product-/winkelmandweergave; vervolgens impo
 ### Aanvullende directeurscontrole — opslagraces opgelost
 
 De laatste recipeDELETE/PUT-race is atomisch hersteld; de directeur herhaalde de recept- en accountrouteproeven: **6/6 groen**. Opruiming claimt verweesde uploads pas na een actuele controle op recept- en importkoppelingen. Een reeds geclaimde mislukte R2-verwijdering blijft in het opslagquotum meetellen. De accountpurge controleert zijn lease opnieuw binnen dezelfde D1-transactie, vóór enige gegevensverwijdering. De directeur inspecteerde de SQL en herhaalde de definitieve onderhouds- en opslagtests: **24/24 groen**, plus Worker-typecheck. Hiermee is deze backendstap lokaal akkoord; live leverancierstoegang en pilotgates blijven open.
+
+### Picnic-popup — manager akkoord, directeur lokaal gecontroleerd
+
+De frontend gebruikt de eigen Picnic-API voor koppelen/vervangen, SMS-verificatie, ontkoppelen en alleen-lezen product-/mandweergave. De manager corrigeerde hervatbaarheid, vernieuwde accountstatus, achterhaalde antwoorden na vervanging en toetsenbordfocus. De directeur herhaalde frontend-TypeScript en de productiebuild; beide groen.
+
+De lokale browserproef gebruikt uitsluitend een fictieve account en een tijdelijke onbruikbare SMS-status, zonder Picnic te benaderen. Gecontroleerd: popup opent met focus op het eerste veld, sluiten wist ingevulde testcredentials, heropenen toont lege velden, focus keert terug naar de opener, en SMS is na paginaherladen hervatbaar zonder nieuwe sms-aanvraag. Op 320px breedte zijn document en scrollbreedte beide 320px; de dialoog past. De teststatus is opgeruimd, de testaccount uitgelogd en de viewport hersteld. Echte Picnic-authenticatie en de live product-/mandgegevens blijven afzonderlijke pilotproeven.
