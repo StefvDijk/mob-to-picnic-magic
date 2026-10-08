@@ -23,6 +23,7 @@ Foutvorm: `{ error: { code, message, fields? } }`, met Nederlandse veilige meldi
 | `GET /api/recipes/:id` | Eigen recept met ingrediënten, bron, versienummer en uploadverwijzingen |
 | `PUT /api/recipes/:id` | Volledige bewerkbare inhoud plus verwachte versie; conditionele update |
 | `DELETE /api/recipes/:id` | Eigen recept verwijderen en verweesde bronbestanden duurzaam opruimen |
+| `DELETE /api/recipes/:id/source` | Alleen de zelfstandige bewaarde bronkopie verwijderen; recept en bewerkingen blijven bestaan; 204 |
 | `POST /api/uploads` | Begrensde afbeelding, gecontroleerde inhoud en atomair gereserveerde ruimte; private ID |
 | `GET /api/uploads/:id` | Alleen eigenaar, veilige content headers; geen publieke R2-link |
 | `DELETE /api/uploads/:id` | Bron los verwijderen; herkende recepttekst behouden |
@@ -47,6 +48,14 @@ Foutvorm: `{ error: { code, message, fields? } }`, met Nederlandse veilige meldi
 | `PATCH /api/admin/switches` | AI en toevoegen afzonderlijk aan/uit; recente verificatie |
 
 ## Interne grenzen
+
+### Geïmplementeerde importopslag
+
+`POST /api/imports` accepteert momenteel `{ type: 'text', text }` of `{ type: 'url', url, sourceLabel? }`. Tekst is maximaal 50.000 tekens; links zijn beperkt tot de gecontroleerde HTTPS-bronnen. Afbeeldingsinvoer volgt later. `GET /api/imports/:id` gebruikt `ImportDto` uit `shared/imports.ts`, inclusief kandidaten, oorspronkelijke tekst/link, onzekerheden en de oorspronkelijke vervaldatum. Ook de statussen `saved` en `expired` zijn onderdeel van het contract.
+
+Om een gecontroleerd importrecept te bewaren, bevat `POST /api/recipes` naast de bewerkte inhoud optioneel `importSource: { importId, candidateIndex }`. Een index selecteert één resultaat; `null` bewaart de beschikbare bron zonder een automatisch gekozen kandidaat, bijvoorbeeld bij handmatige invoer. De server valideert eigenaar, status en geldigheid en kopieert de bron atomair met het recept. Een al bewaard importconcept kan tot zijn oorspronkelijke vervaldatum voor een andere kandidaat worden gebruikt. De vervaldatum wordt niet verlengd door bewaren.
+
+Receptdetail en schrijfresultaten bevatten `sourceSnapshot` (of `null`); de receptenlijst laat dit veld weg. De kopie bevat de oorspronkelijke tekst/link en eventueel de geselecteerde kandidaat. `PUT /api/recipes/:id` wijzigt deze kopie niet en wijst `importSource` af. Los verwijderen vereist `DELETE /api/recipes/:id/source`; verwijderen van het recept verwijdert de kopie mee. Tijdelijke importretentie verwijdert de zelfstandige kopie bij het recept niet.
 
 `worker/auth/` bepaalt account en sessie voor elke route. `worker/db/` bezit transactie-invarianten. `worker/domain/` bevat pure rekenregels; geen AI, netwerk of toegangsbesluiten. `worker/adapters/` beperkt Picnic, e-mail en AI. `worker/routes/` valideert invoer en gebruikt deze modules. `worker/jobs/` verwerkt queues, outbox en onderhoud met duurzame status. `worker/index.ts` is uitsluitend de samenstelling en handlers.
 

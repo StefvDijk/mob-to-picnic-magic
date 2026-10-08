@@ -42,30 +42,40 @@ Controleer na migratie en starten `GET /api/health` en de SPA-root. Voer daarna
 D1/R2-bindings en gemockte externe antwoorden. Voor import- en toevoegjobs
 zijn ook herleverings- en foutproeven nodig zodra hun handlers compleet zijn.
 
-## Eerste beheerder, uitsluitend via een lokale CLI (nog te bouwen)
+## Eerste beheerder via de bootstrap-CLI
 
 De eerste beheerder moet in een lege, gemigreerde database worden aangemaakt met
-een expliciete `scripts/bootstrap-admin.mjs`-CLI. Deze CLI bestaat nog niet; de
-onderstaande aanroepen zijn het te implementeren contract. Er bestaat geen publieke
-bootstraproute. De CLI moet beide records als één D1-transactie invoegen: een
+een expliciete `scripts/bootstrap-admin.mjs`-CLI. Er bestaat geen publieke
+bootstraproute. De CLI doet standaard alleen een read-only proef; gebruik
+`--apply` pas nadat de lege, gemigreerde doelomgeving is bevestigd. De CLI moet
+beide records als één D1-transactie invoegen: een
 native Better Auth-`user` met een ISO-datum in `createdAt` en `updatedAt`,
 gevolgd door het actieve `app_accounts`-record met dezelfde UUID en het
 genormaliseerde e-mailadres. `emailVerified` begint op `0`; de eigenaar
 verifieert het adres door een echte e-mailcode te gebruiken. De
 `app_accounts_insert_policy`-trigger laat precies de eerste actieve beheerder
-zonder uitnodiging toe. Bij een bestaande account stopt de CLI zonder nieuwe
-beheerder of extra rol te maken.
+zonder uitnodiging toe. Beide inserts moeten in dezelfde transactie ook
+conditioneel controleren dat zowel de native `user`- als de `app_accounts`-
+tabel nog leeg is. De tweede insert accepteert uitsluitend de zojuist
+aangemaakte UUID. Een herhaalde of gelijktijdige bootstrap mag in geen van
+beide tabellen een extra rij achterlaten.
 
-Na implementatie van de CLI zijn de bedoelde aanroepen:
+Voor lokaal gebruik zijn de bedoelde aanroepen:
 
 ```sh
+node scripts/bootstrap-admin.mjs --env development --email beheerder@example.nl
 node scripts/bootstrap-admin.mjs --env development --email beheerder@example.nl --apply
 node scripts/bootstrap-admin.mjs --env test --email beheerder@example.nl --apply
 ```
 
-De CLI mag in productie uitsluitend met `--env production --remote --apply`
-werken, nadat de productiepoortjes hieronder zijn afgehandeld. Hij schrijft
-geen SQL, OTP, sessietoken of secret naar de terminal. Een gewone uitnodiging
+De CLI mag in productie uitsluitend met `--env production --remote
+--database-id <exacte-d1-uuid> --email beheerder@example.nl --apply` werken,
+nadat de productiepoortjes hieronder zijn afgehandeld. Remote gebruik zonder
+`--remote`, een ontbrekende/sentinel database-ID of een ID die niet exact bij
+de geselecteerde Wrangler-omgeving past, wordt geweigerd. Hij schrijft geen
+SQL, OTP, sessietoken of secret naar de terminal. Wrangler-logs voor deze
+aanroep staan tijdelijk in een private map en worden na afloop verwijderd.
+Een gewone uitnodiging
 voor latere leden loopt via de beheerdersfunctie na inloggen; opnieuw
 bootstrap uitvoeren is daarvoor niet toegestaan. Bewaar het gekozen
 beheerdersadres in de operationele administratie, los van de repository.

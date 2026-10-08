@@ -24,7 +24,7 @@ npm run dev:worker
 npm run dev
 ```
 
-De website draait op `http://localhost:5173`; `/api` wordt zonder padwijziging doorgestuurd naar de lokale Worker op poort 8787. `GET /api/health` geeft een minimale status. D1, R2 en queuebindings worden lokaal nagebootst. De eerste beheerder krijgt een afzonderlijke lokale CLI na migratie; die CLI is nog niet geïmplementeerd. Het contract, de testomgeving en productiepoortjes staan in het [operationele runbook](docs/OPERATIONS.md). De oorspronkelijke frontend wordt tijdens de bouw vervangen; een geslaagde healthcheck betekent nog niet dat alle recept- en accountfuncties klaar zijn.
+De website draait op `http://localhost:5173`; `/api` wordt zonder padwijziging doorgestuurd naar de lokale Worker op poort 8787. `GET /api/health` geeft een minimale status. D1, R2 en queuebindings worden lokaal nagebootst. Maak de eerste beheerder na migratie met `node scripts/bootstrap-admin.mjs --env development --email beheerder@example.nl`; dit is standaard een read-only proef. Voeg `--apply` toe om de eerste admin in de lokale database aan te maken. Het test- en productiepad staat in het [operationele runbook](docs/OPERATIONS.md). De oorspronkelijke frontend wordt tijdens de bouw vervangen; een geslaagde healthcheck betekent nog niet dat alle recept- en accountfuncties klaar zijn.
 
 Workers-scripts laden de oude root-`.env` bewust niet automatisch. Gebruik uitsluitend lokale, genegeerde `.dev.vars` voor ontwikkelgeheimen zodra de betreffende integratie is ingericht. Zet geen Picnic-, AI-, e-mail- of authenticatiegeheimen in `VITE_*`: die variabelen kunnen in de browserbundel terechtkomen.
 
