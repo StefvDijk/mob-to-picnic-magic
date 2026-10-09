@@ -1,0 +1,85 @@
+{
+  "datasetVersion": "synthetic-offline-v1",
+  "evidence": "Synthetic contract/rule evaluation only; not recipe accuracy, retrieval recall, provider latency or 30-second proof.",
+  "versions": {
+    "knowledge": "nl-kitchen-2026-10-08.2",
+    "matching": "nl-rules-2026-10-09.2"
+  },
+  "development": {
+    "count": 30,
+    "passed": 30,
+    "failures": []
+  },
+  "existingSyntheticHeldOut": {
+    "count": 30,
+    "passed": 30,
+    "failures": []
+  },
+  "quantities": {
+    "count": 5,
+    "passed": 5,
+    "failures": []
+  },
+  "probes": [
+    {
+      "name": "Unicode spoon fraction",
+      "knowledgeKey": "olive-oil",
+      "demand": null,
+      "estimates": [
+        "Hoeveelheid onbekend. Kies zelf een verpakkingsaantal."
+      ]
+    },
+    {
+      "name": "English spoon",
+      "knowledgeKey": "olive-oil",
+      "demand": null,
+      "estimates": [
+        "Hoeveelheid onbekend. Kies zelf een verpakkingsaantal."
+      ]
+    },
+    {
+      "name": "English ingredient vocabulary",
+      "knowledgeKey": "unverified:olive oil",
+      "demand": null,
+      "estimates": [
+        "Hoeveelheid onbekend. Kies zelf een verpakkingsaantal."
+      ]
+    },
+    {
+      "name": "Cup quantity",
+      "knowledgeKey": "flour",
+      "demand": null,
+      "estimates": [
+        "Hoeveelheid onbekend. Kies zelf een verpakkingsaantal."
+      ]
+    },
+    {
+      "name": "Fractional handful",
+      "knowledgeKey": "pistachio",
+      "demand": {
+        "kind": "exact",
+        "amount": "30",
+        "unit": "g",
+        "basis": "net"
+      },
+      "estimates": [
+        "Geschat: een handje ≈ 30 g."
+      ]
+    },
+    {
+      "name": "Unspecified dried/fresh fruit",
+      "knowledgeKey": "dried-apricot",
+      "demand": null,
+      "estimates": [
+        "Hoeveelheid onbekend. Kies zelf een verpakkingsaantal."
+      ]
+    }
+  ],
+  "localRuleEvaluation": {
+    "repetitions": 100,
+    "casesPerRepetition": 30,
+    "elapsedMs": 11.02
+  },
+  "externalRequests": 0,
+  "costCents": 0
+}

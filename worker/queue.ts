@@ -1,17 +1,17 @@
-import type { AuthEnv } from './auth';
 import { processImportTask } from './imports/processor';
+import { dispatchAiAttempts, processAiAttempt, type AiEnv } from './imports/ai';
 import { processAdditionTask } from './additions/processor';
 import type { PicnicKeyEnv } from './security/credentials';
 
-function isImportMessage(body: unknown): body is { kind: 'import'; taskId: string; version: 1 } {
+function isImportMessage(body: unknown): body is { kind: 'import' | 'ai_attempt'; taskId: string; version: 1 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
   const message = body as Record<string, unknown>;
-  return message.kind === 'import' && message.version === 1 &&
+  return (message.kind === 'import' || message.kind === 'ai_attempt') && message.version === 1 &&
     typeof message.taskId === 'string' && message.taskId.length > 0 && message.taskId.length <= 128;
 }
 
 /** Acknowledgement follows durable processing; unsupported jobs remain visible through retries/DLQ. */
-export async function handleQueue(batch: MessageBatch<unknown>, env: AuthEnv & PicnicKeyEnv): Promise<void> {
+export async function handleQueue(batch: MessageBatch<unknown>, env: AiEnv & PicnicKeyEnv & { AI_QUEUE?: Queue<{ kind: 'ai_attempt'; taskId: string; version: number }> }): Promise<void> {
   const suffix = env.APP_ENV === 'development' ? 'local' : env.APP_ENV;
   for (const message of batch.messages) {
     try {
@@ -23,11 +23,17 @@ export async function handleQueue(batch: MessageBatch<unknown>, env: AuthEnv & P
         else message.ack();
         continue;
       }
-      if (batch.queue !== `picnic-imports-${suffix}` || !isImportMessage(message.body)) {
+      const isImportQueue = batch.queue === `picnic-imports-${suffix}`;
+      const isAiQueue = batch.queue === `picnic-ai-${suffix}`;
+      if ((!isImportQueue && !isAiQueue) || !isImportMessage(message.body) ||
+          (isImportQueue && message.body.kind !== 'import') || (isAiQueue && message.body.kind !== 'ai_attempt')) {
         message.retry({ delaySeconds: 60 });
         continue;
       }
-      const outcome = await processImportTask(env, message.body.taskId, message.body.version);
+      const outcome = message.body.kind === 'ai_attempt'
+        ? await processAiAttempt(env, message.body.taskId, message.body.version)
+        : await processImportTask(env, message.body.taskId, message.body.version);
+      if (outcome === 'processed') await dispatchAiAttempts(env);
       if (outcome === 'busy' || outcome === 'blocked') message.retry({ delaySeconds: 60 });
       else message.ack();
     } catch {

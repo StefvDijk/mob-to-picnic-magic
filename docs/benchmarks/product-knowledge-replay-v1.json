@@ -1,0 +1,604 @@
+{
+  "schemaVersion": 1,
+  "knowledgeVersion": "product-knowledge-v1:nl-kitchen-2026-10-09.3",
+  "evidence": "Development replay over saved observations, not independent recipe ground truth or end-to-end latency.",
+  "labelledPairs": {
+    "evidence": "15 manually specified development ingredient-product pairs from existing observations. Labels express acceptable automatic use, not exact negative status. Not a held-out recipe benchmark. Source payloads stay in local SQLite outside Git.",
+    "total": 15,
+    "correct": 15,
+    "automatic": 6,
+    "automaticCorrect": 6,
+    "precision": 1,
+    "positiveCoverage": 1,
+    "abstentions": 6,
+    "cases": [
+      {
+        "productId": "s1003179",
+        "kind": "coconut-yoghurt",
+        "automatic": true,
+        "status": "suitable",
+        "correct": true,
+        "inputHash": "0a8614c4bde3aa91aee3acaae3624416b589ed557d171ccdb1cddf5d94bf9149",
+        "reason": "Productomschrijving bevestigt gefermenteerde kokosyoghurt."
+      },
+      {
+        "productId": "s1006357",
+        "kind": "cinnamon",
+        "form": "poeder",
+        "automatic": true,
+        "status": "suitable",
+        "correct": true,
+        "inputHash": "a1150e5cd068ebf7d45164cb3874e3780cb5f0740383ac10dda32f260f2b4e58",
+        "reason": "Productomschrijving bevestigt soort en vereiste vorm."
+      },
+      {
+        "productId": "s1000206",
+        "kind": "oregano-fresh",
+        "automatic": true,
+        "status": "suitable",
+        "correct": true,
+        "inputHash": "a92938b6088ee2879a4d008075db06c66fd39be0526532a551b964616f90b745",
+        "reason": "Productomschrijving bevestigt soort en vereiste vorm."
+      },
+      {
+        "productId": "s1160729",
+        "kind": "mango",
+        "automatic": true,
+        "status": "suitable",
+        "correct": true,
+        "inputHash": "0dbf6b79bef2b55c46235d342da51083360b37a92b979691548e3d226da181cf",
+        "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+      },
+      {
+        "productId": "s1014666",
+        "kind": "mango",
+        "automatic": true,
+        "status": "suitable",
+        "correct": true,
+        "inputHash": "0d25880e043cdd2df12948bc679d22acede78b09a3743e8f3fc90dce427d03aa",
+        "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+      },
+      {
+        "productId": "s1173086",
+        "kind": "coconut-yoghurt",
+        "automatic": true,
+        "status": "suitable",
+        "correct": true,
+        "inputHash": "b408864bc4a78b221f59c567791391ab03e9eb94b81bc36f6ed5bfe4e7f885e4",
+        "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+      },
+      {
+        "productId": "s1016962",
+        "kind": "mango",
+        "automatic": false,
+        "status": "unresolved",
+        "correct": true,
+        "inputHash": "7f2b07a19325e41f34fd29bea39447095a4b1da586fd336db778fc7cd790cf8c",
+        "reason": "Productsoort kan niet met de beschikbare regels worden bevestigd."
+      },
+      {
+        "productId": "s1153984",
+        "kind": "mango",
+        "automatic": false,
+        "status": "unresolved",
+        "correct": true,
+        "inputHash": "549b37104a0f78e259d2428830d29300d8a09822bc597b453a0b07793d83dd96",
+        "reason": "Productsoort kan niet met de beschikbare regels worden bevestigd."
+      },
+      {
+        "productId": "s1125255",
+        "kind": "mango",
+        "automatic": false,
+        "status": "unresolved",
+        "correct": true,
+        "inputHash": "baab100dd7d7ac21c93aa6ffc0bbbfbd72672f2f4c798f27b85ee51b69bde73d",
+        "reason": "Productsoort kan niet met de beschikbare regels worden bevestigd."
+      },
+      {
+        "productId": "s1066386",
+        "kind": "vanilla-paste",
+        "automatic": false,
+        "status": "substitution",
+        "correct": true,
+        "inputHash": "ff0206fa2cf3c8158dc2c2de8bde593801dc38c068f634562595160eb1fa7600",
+        "reason": "Andere vorm van het ingrediënt; kies expliciet."
+      },
+      {
+        "productId": "s1108761",
+        "kind": "vanilla-paste",
+        "automatic": false,
+        "status": "unresolved",
+        "correct": true,
+        "inputHash": "039b32944491d174aacf0af7c1e1df8302344cf2359abf5cf935278abd551807",
+        "reason": "Productsoort kan niet met de beschikbare regels worden bevestigd."
+      },
+      {
+        "productId": "s1006698",
+        "kind": "oregano-fresh",
+        "automatic": false,
+        "status": "unresolved",
+        "correct": true,
+        "inputHash": "fbd274e8bd560aa0db4d06f0fcf56946a5211935f58d5fc5c39668180dd7af6c",
+        "reason": "Verse of gedroogde vorm ontbreekt."
+      },
+      {
+        "productId": "s1090163",
+        "kind": "cinnamon",
+        "form": "poeder",
+        "automatic": false,
+        "status": "unresolved",
+        "correct": true,
+        "inputHash": "566aff398c2e64ee59bc6e6e4f484e83b8ab593490257231738873a63f19ef80",
+        "reason": "Expliciete vorm of variant is niet bewezen."
+      },
+      {
+        "productId": "s1008721",
+        "kind": "cinnamon",
+        "form": "poeder",
+        "automatic": false,
+        "status": "substitution",
+        "correct": true,
+        "inputHash": "921540559bfeb4b8ebe9a0d49d3537038fcf1148d02760b29c06f772f9fe8c57",
+        "reason": "Andere vorm of variant; kies expliciet."
+      },
+      {
+        "productId": "s1176231",
+        "kind": "kefir",
+        "automatic": false,
+        "status": "substitution",
+        "correct": true,
+        "inputHash": "4137b2bba95e8462c9c85608cfe095a17ba282ce90dc2c156d8bffb730ca2d03",
+        "reason": "Andere vorm of variant; kies expliciet."
+      }
+    ]
+  },
+  "productCount": 642,
+  "detailsCount": 329,
+  "kindKnown": 280,
+  "kindConflict": 8,
+  "formKnown": 26,
+  "providerRequests": 0,
+  "paidRequests": 0,
+  "costCents": 0,
+  "recipes": [
+    {
+      "sourceHash": "6f05dc14a5bafdac269c5db0f28d4aa61b838defcd537800cc8665759a33fed6",
+      "title": "Kip Marbella met rijst",
+      "sourceLines": 18,
+      "groups": 18,
+      "selected": 15,
+      "missing": [
+        "sherry-vinegar"
+      ],
+      "replayMs": 192.91529099999997,
+      "rows": [
+        {
+          "kind": "chicken-thigh",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1015027",
+            "packCount": 3,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1015027",
+          "estimates": [
+            "Geschat: één stuk ≈ 125 g.",
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 579
+        },
+        {
+          "kind": "garlic",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 533,
+          "chosen": {
+            "productId": "s1001194",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1001194",
+          "estimates": [
+            "Geschat: één teentje ≈ 5 g.",
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 526
+        },
+        {
+          "kind": "sherry-vinegar",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": null,
+          "nameOnlyChosen": null,
+          "estimates": [
+            "Rekenmaat: eetlepel 15 ml, theelepel 5 ml."
+          ],
+          "uncertainty": 574
+        },
+        {
+          "kind": "olive-oil",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1173143",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1173143",
+          "estimates": [
+            "Rekenmaat: eetlepel 15 ml, theelepel 5 ml."
+          ],
+          "uncertainty": 555
+        },
+        {
+          "kind": "green-olives|zonder pit|variant:groene",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1178864",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1178864",
+          "estimates": [
+            "Geschat: eetlepel groene olijven zonder pit ≈ 15 g.",
+            "Geschat uitlekgewicht: 50% van de verpakking."
+          ],
+          "uncertainty": 586
+        },
+        {
+          "kind": "capers",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1012986",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1012986",
+          "estimates": [
+            "Geschat: eetlepel kappertjes ≈ 10 g.",
+            "Geschat uitlekgewicht: 50% van de verpakking."
+          ],
+          "uncertainty": 588
+        },
+        {
+          "kind": "dried-apricot|gedroogd",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 580,
+          "chosen": {
+            "productId": "s1152079",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1152079",
+          "estimates": [
+            "Geschat: een handje ≈ 40 g."
+          ],
+          "uncertainty": 578
+        },
+        {
+          "kind": "dried-prune|gedroogd",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 580,
+          "chosen": {
+            "productId": "s1152074",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1152074",
+          "estimates": [
+            "Geschat: een handje ≈ 40 g."
+          ],
+          "uncertainty": 578
+        },
+        {
+          "kind": "cinnamon|form:poeder",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1006357",
+            "packCount": 1,
+            "reason": "Productomschrijving bevestigt soort en vereiste vorm."
+          },
+          "nameOnlyChosen": null,
+          "estimates": [
+            "Geschat: eetlepel kaneelpoeder ≈ 8 g."
+          ],
+          "uncertainty": 587
+        },
+        {
+          "kind": "coriander-seed",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1005228",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1005228",
+          "estimates": [
+            "Geschat: eetlepel korianderzaad ≈ 6 g."
+          ],
+          "uncertainty": 588
+        },
+        {
+          "kind": "pomegranate-molasses",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1018128",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1018128",
+          "estimates": [
+            "Rekenmaat: eetlepel 15 ml, theelepel 5 ml."
+          ],
+          "uncertainty": 589
+        },
+        {
+          "kind": "white-wine|variant:droog",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1017219",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1017219",
+          "estimates": [
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 587
+        },
+        {
+          "kind": "brown-sugar|bruin",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1007898",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1007898",
+          "estimates": [
+            "Geschat: eetlepel bruine suiker ≈ 13 g."
+          ],
+          "uncertainty": 589
+        },
+        {
+          "kind": "oregano-fresh|vers",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 573,
+          "chosen": {
+            "productId": "s1000206",
+            "packCount": 1,
+            "reason": "Productomschrijving bevestigt soort en vereiste vorm."
+          },
+          "nameOnlyChosen": null,
+          "estimates": [
+            "Hoeveelheid ontbreekt; startschatting 5 g voor het bronrecept. Pas zo nodig aan."
+          ],
+          "uncertainty": 571
+        },
+        {
+          "kind": "pistachio",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1187061",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1187061",
+          "estimates": [
+            "Geschat: eetlepel pistachenoten ≈ 10 g.",
+            "Geschat eetbaar gewicht bij mogelijke doppen: 50% van de verpakking."
+          ],
+          "uncertainty": 583
+        },
+        {
+          "kind": "rice",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1016692",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1016692",
+          "estimates": [
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 548
+        },
+        {
+          "kind": "salt",
+          "sourceLines": 2,
+          "pantry": true,
+          "candidates": 589,
+          "chosen": {
+            "productId": "s1052827",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1052827",
+          "estimates": [
+            "Hoeveelheid ontbreekt; startschatting 2 g voor het bronrecept. Pas zo nodig aan."
+          ],
+          "uncertainty": 569
+        },
+        {
+          "kind": "black-pepper|zwart",
+          "sourceLines": 2,
+          "pantry": true,
+          "candidates": 577,
+          "chosen": {
+            "productId": "s1090216",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1090216",
+          "estimates": [
+            "Hoeveelheid ontbreekt; startschatting 1 g voor het bronrecept. Pas zo nodig aan."
+          ],
+          "uncertainty": 569
+        }
+      ],
+      "observedProducts": 642,
+      "details": 329
+    },
+    {
+      "sourceHash": "14518d6b1db8ee9c88565bb2d78646a18ed3d2b50f94fba506091eecfe16a82b",
+      "title": "Recept zonder titel",
+      "sourceLines": 9,
+      "groups": 8,
+      "selected": 6,
+      "missing": [
+        "vanilla-paste"
+      ],
+      "replayMs": 59.67779200000001,
+      "rows": [
+        {
+          "kind": "chia",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1009039",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1009039",
+          "estimates": [
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 588
+        },
+        {
+          "kind": "kefir",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 632,
+          "chosen": {
+            "productId": "s1176232",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1176232",
+          "estimates": [
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 620
+        },
+        {
+          "kind": "coconut-yoghurt",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 632,
+          "chosen": {
+            "productId": "s1003179",
+            "packCount": 1,
+            "reason": "Productomschrijving bevestigt gefermenteerde kokosyoghurt."
+          },
+          "nameOnlyChosen": null,
+          "estimates": [
+            "Verpakking en recept berekend op nettohoeveelheid."
+          ],
+          "uncertainty": 630
+        },
+        {
+          "kind": "vanilla-paste",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": null,
+          "nameOnlyChosen": null,
+          "estimates": [
+            "Hoeveelheid onbekend. Kies zelf een verpakkingsaantal."
+          ],
+          "uncertainty": 585
+        },
+        {
+          "kind": "honey",
+          "sourceLines": 2,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1188415",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1188415",
+          "estimates": [
+            "Geschat: eetlepel honing ≈ 21 g."
+          ],
+          "uncertainty": 579
+        },
+        {
+          "kind": "passionfruit",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1015390",
+            "packCount": 2,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1015390",
+          "estimates": [],
+          "uncertainty": 589
+        },
+        {
+          "kind": "mango",
+          "sourceLines": 1,
+          "pantry": false,
+          "candidates": 590,
+          "chosen": {
+            "productId": "s1014109",
+            "packCount": 2,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1014109",
+          "estimates": [],
+          "uncertainty": 584
+        },
+        {
+          "kind": "salt",
+          "sourceLines": 1,
+          "pantry": true,
+          "candidates": 589,
+          "chosen": {
+            "productId": "s1052827",
+            "packCount": 1,
+            "reason": "Productnaam bevestigt ingrediënt en vereiste variant."
+          },
+          "nameOnlyChosen": "s1052827",
+          "estimates": [
+            "Geschat: eetlepel keukenzout ≈ 18 g."
+          ],
+          "uncertainty": 569
+        }
+      ],
+      "observedProducts": 642,
+      "details": 329
+    }
+  ]
+}

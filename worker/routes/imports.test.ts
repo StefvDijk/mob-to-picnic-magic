@@ -6,6 +6,7 @@ import { handleAuth, type AuthEnv } from '../auth';
 import { handleImports } from './imports';
 import { processImportTask } from '../imports/processor';
 import { dispatchImportOutbox } from '../imports/outbox';
+import { createAiAttempt, processAiAttempt, type AiEnv, type AiProvider } from '../imports/ai';
 import { handleRequest } from '../index';
 
 const db = env.DB;
@@ -73,36 +74,94 @@ beforeAll(async () => {
 });
 
 describe('import routes and durable worker', () => {
-  it('authenticates, stores source text with one ID-only outbox task, and isolates owners', async () => {
+  it('authenticates URL imports, stores one ID-only outbox task, and isolates owners', async () => {
     expect((await handleImports(request('/api/imports', 'POST', { type: 'text', text: '1 ui, 2 tomaten' }), testEnv))?.status).toBe(401);
-    const response = await handleImports(request('/api/imports', 'POST', { type: 'text', text: '1 ui, 2 tomaten' }, firstCookie), testEnv);
+    const response = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/recept' }, firstCookie), testEnv);
     expect(response?.status).toBe(202);
-    const created = (await response!.json() as { import: { id: string; sourceText: string; status: string } }).import;
-    expect(created).toMatchObject({ sourceText: '1 ui, 2 tomaten', status: 'queued' });
+    const created = (await response!.json() as { import: { id: string; sourceText: string | null; sourceUrl: string; status: string } }).import;
+    expect(created).toMatchObject({ sourceUrl: 'https://culy.nl/recept', sourceText: null, status: 'queued' });
     expect(await db.prepare(`SELECT COUNT(*) AS count FROM outbox WHERE task_type='import' AND task_id=?`)
       .bind(created.id).first()).toMatchObject({ count: 1 });
     expect(await db.prepare(`SELECT payload_json AS payload FROM outbox WHERE task_type='import' AND task_id=?`)
       .bind(created.id).first()).toMatchObject({ payload: '{}' });
     expect((await handleImports(request(`/api/imports/${created.id}`, 'GET', undefined, secondCookie), testEnv))?.status).toBe(404);
-    expect(await processImportTask(testEnv, created.id, 1)).toBe('processed');
+    const page = new Response(`<script type="application/ld+json">${JSON.stringify({ '@type':'Recipe',name:'Tomato soup',recipeIngredient:['2 tomatoes'],recipeInstructions:['Cook the tomatoes.'] })}</script>`, { headers: { 'Content-Type':'text/html' } });
+    expect(await processImportTask(testEnv, created.id, 1, { fetch: async () => page.clone() })).toBe('processed');
     expect(await processImportTask(testEnv, created.id, 1)).toBe('already_done');
     const loaded = await handleImports(request(`/api/imports/${created.id}`, 'GET', undefined, firstCookie), testEnv);
-    expect((await loaded!.json() as { import: { status: string; sourceText: string; candidates: unknown[]; uncertainties: string[] } }).import)
-      .toMatchObject({ status: 'needs_review', sourceText: '1 ui, 2 tomaten', candidates: [], uncertainties: ['recognition_pending', 'source_text_not_parsed'] });
+    expect((await loaded!.json() as { import: { status: string; sourceUrl: string; candidates: unknown[] } }).import)
+      .toMatchObject({ status: 'needs_review', sourceUrl: 'https://culy.nl/recept', candidates: [{ title: 'Tomato soup' }] });
   });
 
-  it('accepts the full Unicode text limit through the composed HTTP handler and returns private GET responses', async () => {
-    const text = 'é'.repeat(40_000);
+  it('automatically normalizes a URL recipe with a metered structured recognition attempt', async () => {
+    const now = Date.now();
+    const importId = crypto.randomUUID();
+    const source = 'Pasta\nServings: 2\n250 g flour\nMix the flour.';
+    await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_url,status,result_json,uncertainties_json,expires_at,created_at,updated_at)
+      VALUES(?,?,'url','https://culy.nl/pasta','needs_review','[]','[]',?,?,?)`)
+      .bind(importId, (await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(firstEmail).first<{id:string}>())!.id,
+        now + 7 * 24 * 60 * 60 * 1000, now, now).run();
+    const aiEnv: AiEnv = { ...testEnv, OPENAI_API_KEY: 'test-key', AI_PRICE_ATTESTATION: 'gpt-6-luna-standard-2026-10-08+model-prices-verified',
+      AI_PRICE_VALID_UNTIL: new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString(), AI_EUR_PER_USD_BPS: '25000' };
+    await createAiAttempt(aiEnv, importId, now, source);
+    const attempt = await db.prepare(`SELECT id FROM ai_attempts WHERE import_id=?`).bind(importId).first<{id:string}>();
+    expect(attempt).toBeTruthy();
+    const extracted = { title: 'Pasta', baseServings: '2', sections: [], ingredients: [{ section: null, originalText: '250 g flour',
+      normalizedName: 'flour', quantity: { kind: 'exact', amount: '250', unit: 'g', basis: null },
+      attributes: { form: null, variant: null, brand: null }, uncertainty: [], sourceQuote: '250 g flour' }], steps: ['Mix the flour.'], uncertainty: [] };
+    const provider: AiProvider = { count: async () => 100, send: async () => ({ status: 200, requestId: 'test', body: {
+      status: 'completed', usage: { input_tokens: 100, output_tokens: 100 },
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(extracted) }] }],
+    } }) };
+    expect(await processAiAttempt(aiEnv, attempt!.id, 1, { provider, now: () => now + 1000 })).toBe('processed');
+    const result = await db.prepare(`SELECT status,result_json AS result FROM imports WHERE id=?`).bind(importId).first<{status:string;result:string}>();
+    expect(result?.status).toBe('needs_review');
+    expect(JSON.parse(result!.result)[0].ingredients[0]).toMatchObject({ originalText: '250 g flour', normalizedName: 'flour', sourceOrigin: 'ai' });
+    expect(await db.prepare(`SELECT state FROM ai_attempts WHERE id=?`).bind(attempt!.id).first('state')).toBe('succeeded');
+  });
+
+  it('sends attached private photo bytes as vision input and accepts visually quoted lines', async () => {
+    const now = Date.now();
+    const ownerId = (await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(firstEmail).first<{id:string}>())!.id;
+    const importId = crypto.randomUUID(), uploadId = crypto.randomUUID();
+    await db.prepare(`INSERT OR IGNORE INTO user_upload_usage(owner_id) VALUES(?)`).bind(ownerId).run();
+    await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,status,result_json,uncertainties_json,expires_at,created_at,updated_at)
+      VALUES(?,?,'upload','needs_review','[]','[]',?,?,?)`)
+      .bind(importId, ownerId, now + 7 * 24 * 60 * 60 * 1000, now, now).run();
+    await db.prepare(`INSERT INTO uploads(id,owner_id,object_key,media_type,byte_size,status,created_at) VALUES(?,?,?,'image/png',8,'reserved',?)`)
+      .bind(uploadId, ownerId, `private/accounts/${ownerId}/uploads/${uploadId}`, now).run();
+    await db.prepare(`UPDATE uploads SET status='stored' WHERE id=? AND owner_id=?`).bind(uploadId, ownerId).run();
+    await db.prepare(`INSERT INTO import_uploads(owner_id,import_id,upload_id) VALUES(?,?,?)`).bind(ownerId, importId, uploadId).run();
+    const imageBytes = new Uint8Array([137,80,78,71,13,10,26,10]);
+    const aiEnv: AiEnv = { ...testEnv, UPLOADS: { get: async () => ({ arrayBuffer: async () => imageBytes.buffer }) } as unknown as R2Bucket,
+      OPENAI_API_KEY: 'test-key', AI_PRICE_ATTESTATION: 'gpt-6-luna-standard-2026-10-08+model-prices-verified',
+      AI_PRICE_VALID_UNTIL: new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString(), AI_EUR_PER_USD_BPS: '25000' };
+    await createAiAttempt(aiEnv, importId, now);
+    const attempt = await db.prepare(`SELECT id FROM ai_attempts WHERE import_id=?`).bind(importId).first<{id:string}>();
+    const extracted = { title: 'Tomato salad', baseServings: null, sections: [], ingredients: [{ section: null, originalText: '2 tomatoes',
+      normalizedName: 'tomato', quantity: { kind: 'exact', amount: '2', unit: 'piece', basis: null },
+      attributes: { form: null, variant: null, brand: null }, uncertainty: [], sourceQuote: '2 tomatoes' }], steps: [], uncertainty: [] };
+    let sawImage = false;
+    const provider: AiProvider = { count: async body => {
+      const content = (body.input as Array<{content:Array<{type:string}>}>)[0].content;
+      sawImage ||= content.some(item => item.type === 'input_image'); return 100;
+    }, send: async body => {
+      const content = (body.input as Array<{content:Array<{type:string}>}>)[0].content;
+      sawImage ||= content.some(item => item.type === 'input_image');
+      return { status: 200, requestId: 'test-photo', body: { status: 'completed', usage: { input_tokens: 100, output_tokens: 100 },
+        output: [{ content: [{ type: 'output_text', text: JSON.stringify(extracted) }] }] } };
+    } };
+    expect(await processAiAttempt(aiEnv, attempt!.id, 1, { provider, now: () => now + 1000 })).toBe('processed');
+    expect(sawImage).toBe(true);
+    const result = await db.prepare(`SELECT result_json AS result FROM imports WHERE id=?`).bind(importId).first<{result:string}>();
+    expect(JSON.parse(result!.result)[0].ingredients[0]).toMatchObject({ originalText: '2 tomatoes', sourceOrigin: 'ai' });
+  });
+
+  it('rejects manual text imports through the composed HTTP handler', async () => {
+    const text = '1 ui, 2 tomaten';
     const response = await handleRequest(request('/api/imports', 'POST', { type: 'text', text }, firstCookie), testEnv);
-    expect(response.status).toBe(202);
-    expect(response.headers.get('Cache-Control')).toContain('no-store');
-    const id = (await response.json() as { import: { id: string; sourceText: string } }).import.id;
-    const loaded = await handleRequest(request(`/api/imports/${id}`, 'GET', undefined, firstCookie), testEnv);
-    expect(loaded.status).toBe(200);
-    expect(loaded.headers.get('Cache-Control')).toContain('no-store');
-    expect((await loaded.json() as { import: { sourceText: string } }).import.sourceText).toBe(text);
-    expect(await processImportTask(testEnv, id, 1)).toBe('processed');
-    expect((await handleRequest(request(`/api/imports/${id}`, 'GET', undefined, secondCookie), testEnv)).status).toBe(404);
+    expect(response.status).toBe(400);
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM imports WHERE source_text=?`).bind(text).first()).toMatchObject({ count: 0 });
   });
 
   it('rejects unsupported uploads and unsafe URLs, and fences account/session races', async () => {
@@ -111,12 +170,12 @@ describe('import routes and durable worker', () => {
       expect((await handleImports(request('/api/imports', 'POST', { type: 'url', url }, firstCookie), testEnv))?.status).toBe(400);
     }
     const account = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(secondEmail).first<{ id: string }>();
-    const denied = await handleImports(request('/api/imports', 'POST', { type: 'text', text: 'Race' }, secondCookie), testEnv, {
+    const denied = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/race' }, secondCookie), testEnv, {
       beforeWrite: async () => { await db.prepare(`UPDATE app_accounts SET status='blocked',updated_at=? WHERE id=?`).bind(Date.now(), account!.id).run(); },
     });
     expect(denied?.status).toBe(403);
     expect(await db.prepare(`SELECT COUNT(*) AS count FROM imports WHERE owner_id=?`).bind(account!.id).first()).toMatchObject({ count: 0 });
-    const queued = await handleImports(request('/api/imports', 'POST', { type: 'text', text: 'After unblock' }, secondCookie), testEnv);
+    const queued = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/after' }, secondCookie), testEnv);
     expect(queued?.status).toBe(401);
     await db.prepare(`UPDATE app_accounts SET status='active',updated_at=? WHERE id=?`).bind(Date.now(), account!.id).run();
   });
@@ -164,7 +223,7 @@ describe('import routes and durable worker', () => {
     const queueStub = { send: async (body: { kind: 'import'; taskId: string; version: number }) => {
       queueBodies.push(body); return { metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } };
     } } as unknown as Queue<{ kind: 'import'; taskId: string; version: number }>;
-    const pending = await handleImports(request('/api/imports', 'POST', { type: 'text', text: 'dispatch me' }, firstCookie), testEnv);
+    const pending = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/dispatch' }, firstCookie), testEnv);
     const pendingId = (await pending!.json() as {import:{id:string}}).import.id;
     const dispatched = await dispatchImportOutbox({ DB: db, IMPORT_QUEUE: queueStub }, Date.now() + 1000);
     expect(dispatched).toBeGreaterThan(0);
@@ -173,11 +232,11 @@ describe('import routes and durable worker', () => {
     expect(await dispatchImportOutbox({ DB: db, IMPORT_QUEUE: queueStub }, Date.now() + 1000)).toBe(0);
     expect(queueBodies).toHaveLength(bodyCount);
     expect(queueBodies).toContainEqual({ kind: 'import', taskId: pendingId, version: 1 });
-    expect(await processImportTask(testEnv, pendingId, 1)).toBe('processed');
+    expect(await processImportTask(testEnv, pendingId, 1, { fetch: async () => new Response('<p>recipe</p>', { headers: { 'Content-Type':'text/html' } }) })).toBe('processed');
 
     const member = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(secondEmail).first<{id:string}>();
     const createdAt = Date.now();
-    const recover = await handleImports(request('/api/imports', 'POST', { type: 'text', text: 'recover me' }, secondCookie), testEnv, { now: () => createdAt });
+    const recover = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/recover' }, secondCookie), testEnv, { now: () => createdAt });
     const recoverId = (await recover!.json() as {import:{id:string}}).import.id;
     const beforeRecover = queueBodies.length;
     await dispatchImportOutbox({ DB: db, IMPORT_QUEUE: queueStub }, createdAt);
@@ -189,7 +248,7 @@ describe('import routes and durable worker', () => {
     expect(queueBodies).toHaveLength(beforeRecover + 2);
     expect(await db.prepare(`SELECT status FROM outbox WHERE task_type='import' AND task_id=?`).bind(recoverId).first())
       .toMatchObject({ status: 'sent' });
-    expect(await processImportTask(testEnv, recoverId, 1)).toBe('processed');
+    expect(await processImportTask(testEnv, recoverId, 1, { fetch: async () => new Response('<p>recipe</p>', { headers: { 'Content-Type':'text/html' } }) })).toBe('processed');
 
     const orphanId = crypto.randomUUID(), orphanCreated = createdAt - 120_000;
     await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_text,status,expires_at,created_at,updated_at)
@@ -203,7 +262,7 @@ describe('import routes and durable worker', () => {
       .toMatchObject({ payload: '{}' });
     expect(await processImportTask(testEnv, orphanId, 1)).toBe('processed');
 
-    const slow = await handleImports(request('/api/imports', 'POST', { type: 'text', text: 'dispatch lease' }, firstCookie), testEnv);
+    const slow = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/lease-dispatch' }, firstCookie), testEnv);
     const slowId = (await slow!.json() as {import:{id:string}}).import.id;
     const dispatchAt = Date.now() + 90_000;
     let finishFirstSend!: () => void;

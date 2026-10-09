@@ -107,8 +107,13 @@ async function processDeletionTask(env: Env, task: DeletionRow, now: number, res
       ]);
     }
 
-    const recentExternalCall = await db.prepare(`SELECT 1 FROM execution_lines WHERE owner_id=? AND status='sending'
-      AND attempt_started_at>? LIMIT 1`).bind(task.ownerId, now - EXTERNAL_CALL_GRACE_MS).first();
+    const recentExternalCall = await db.prepare(`SELECT 1 WHERE
+      EXISTS(SELECT 1 FROM execution_lines WHERE owner_id=? AND status='sending' AND attempt_started_at>?)
+      OR EXISTS(SELECT 1 FROM ai_attempts WHERE owner_id=? AND
+        ((state='counting' AND COALESCE(count_started_at,created_at)>?)
+        OR (state='sending' AND COALESCE(send_started_at,created_at)>?)))`)
+      .bind(task.ownerId, now - EXTERNAL_CALL_GRACE_MS, task.ownerId,
+        now - EXTERNAL_CALL_GRACE_MS, now - EXTERNAL_CALL_GRACE_MS).first();
     if (recentExternalCall) throw new Error('external_call_in_flight');
     const staleActions = await db.prepare(`SELECT DISTINCT action_id AS actionId FROM execution_lines
       WHERE owner_id=? AND status='sending' AND attempt_started_at<=? LIMIT ?`)
@@ -282,8 +287,17 @@ async function applyRetention(db: D1Database, now: number, result: MaintenanceRe
     releasedInvitations += 1;
   }
   const statements: D1PreparedStatement[] = [
-    db.prepare(`DELETE FROM imports WHERE (expires_at IS NOT NULL AND expires_at<=?)
-      OR (expires_at IS NULL AND created_at<=?)`).bind(now, now - 7 * DAY),
+    db.prepare(`DELETE FROM shopping_catalog WHERE checked_at<=?`).bind(now - DAY),
+    db.prepare(`DELETE FROM catalog_products WHERE checked_at<=?`).bind(now - 90 * DAY),
+    db.prepare(`DELETE FROM catalog_tasks WHERE due_at<=?`).bind(now - 90 * DAY),
+    db.prepare(`DELETE FROM product_relations WHERE checked_at<=?`).bind(now - 90 * DAY),
+    db.prepare(`UPDATE match_attempts SET payload_json=NULL WHERE updated_at<=? AND payload_json IS NOT NULL`).bind(now - 14 * DAY),
+    db.prepare(`DELETE FROM imports WHERE ((expires_at IS NOT NULL AND expires_at<=?)
+      OR (expires_at IS NULL AND created_at<=?)) AND NOT EXISTS(
+        SELECT 1 FROM ai_attempts a WHERE a.owner_id=imports.owner_id AND a.import_id=imports.id AND
+          ((a.state='counting' AND COALESCE(a.count_started_at,a.created_at)>?)
+          OR (a.state='sending' AND COALESCE(a.send_started_at,a.created_at)>?)))`)
+      .bind(now, now - 7 * DAY, now - EXTERNAL_CALL_GRACE_MS, now - EXTERNAL_CALL_GRACE_MS),
     db.prepare(`DELETE FROM feedback WHERE expires_at<=? OR consented_at<=?`).bind(now, now - 90 * DAY),
     db.prepare(`DELETE FROM actions WHERE created_at<=? AND state IN ('succeeded','stopped','resolved','partial')
       AND NOT EXISTS(SELECT 1 FROM execution_lines e WHERE e.owner_id=actions.owner_id AND e.action_id=actions.id

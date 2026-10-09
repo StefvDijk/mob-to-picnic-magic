@@ -41,6 +41,14 @@ describe('queue composition with durable D1 imports', () => {
     await handleQueue(unsupported.batch, env);
     expect(unsupported.message.retry).toHaveBeenCalledOnce();
   });
+  it('routes AI attempts only on the dedicated AI queue', async () => {
+    const valid = delivery({ kind: 'ai_attempt', taskId: 'missing-attempt', version: 1 }, 'picnic-ai-test');
+    await handleQueue(valid.batch, env);
+    expect(valid.message.ack).toHaveBeenCalledOnce();
+    const wrongQueue = delivery({ kind: 'ai_attempt', taskId: 'missing-attempt', version: 1 }, 'picnic-imports-test');
+    await handleQueue(wrongQueue.batch, env);
+    expect(wrongQueue.message.retry).toHaveBeenCalledOnce();
+  });
   it('acknowledges only after the result is saved and handles a duplicate without changing it', async () => {
     const id = await importFixture();
     const first = delivery({ kind: 'import', taskId: id, version: 1 });

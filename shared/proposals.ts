@@ -7,9 +7,9 @@ export interface ProposalProductDto {
   quantity: Quantity;
   priceCents: number;
   packCount: number;
-  suppliedUnit: 'g' | 'ml' | 'piece';
-  supplied: string;
-  overshoot: string;
+  suppliedUnit?: 'g' | 'ml' | 'piece';
+  supplied?: string;
+  overshoot?: string;
 }
 
 export interface ProposalNeedDto {
@@ -18,7 +18,8 @@ export interface ProposalNeedDto {
   ordinal: number;
   name: string;
   quantity: Quantity;
-  needed: string;
+  needed: string | null;
+  ingredientIds?: string[];
   product: ProposalProductDto;
 }
 

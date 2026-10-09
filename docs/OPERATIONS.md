@@ -1,5 +1,7 @@
 # Lokale start en operationele toelating
 
+> Actuele eerste release: [PILOT-RELEASE.md](PILOT-RELEASE.md). Doel: besloten test op picnic.devstef.nl, eerst eigenaar + één tester. Dit document bevat ook historische stand of uitgebreidere backlog; de releasespecificatie bepaalt wat nu nodig is.
+
 Dit is het bedieningspad voor de besloten pilot. Een lokaal geslaagde proef geeft
 geen toestemming om productie te openen. [Implementatiestatus](IMPLEMENTATION-STATUS.md)
 houdt bij welk bewijs al bestaat; [privacyoperaties](PRIVACY-OPERATIONS.md)
@@ -85,11 +87,7 @@ beheerdersadres in de operationele administratie, los van de repository.
 
 ## Productiepoortjes vóór enige uitrol
 
-De huidige `wrangler.jsonc` bevat opzettelijk
-`REPLACE_WITH_PROVISIONED_D1_ID`. Laat die blokkade staan totdat een operator
-de productiebronnen heeft aangemaakt, de IDs heeft gekoppeld en de isolatie
-heeft gecontroleerd. Ontwikkeling, test en productie krijgen ieder eigen D1,
-private R2-bucket, import- en toevoegqueue, secrets en afzenderinstellingen.
+De productiebronnen zijn op 9 oktober 2026 met expliciete toestemming aangemaakt en de echte IDs zijn gekoppeld. De eigenaarstest draait op `picnic.devstef.nl`; de tweede tester is op verzoek nog niet uitgenodigd. Zie [pilotrelease](PILOT-RELEASE.md) voor werkelijk gecontroleerde poorten en resterend bewijs. Ontwikkeling, test en productie hebben afzonderlijke D1, private R2, import-, AI- en toevoegqueues, secrets en afzenderinstellingen.
 Leg voor D1 en R2 bij creatie EU-jurisdictie vast waar beschikbaar; dit maakt
 de gehele verwerkingsketen niet automatisch EU-only. Geen testaccounts of
 recepten naar productie kopiëren.
@@ -99,7 +97,7 @@ recepten naar productie kopiëren.
 | Binding en domein | Werkelijke D1-ID, private R2-bucket, afzonderlijke queues en `APP_ORIGIN=https://picnic.devstef.nl`; DNS/TLS en dezelfde-origin cookies gecontroleerd. Geen automatische productieprovisioning op basis van lege IDs. |
 | Geheimen | Per omgeving onafhankelijke `AUTH_SECRET`, `OTP_HMAC_SECRET`, `EMAIL_ADDRESS_HMAC_SECRET` en een 32-byte `PICNIC_ENCRYPTION_KEY` als base64, plus versie; alleen via Cloudflare secrets of genegeerde lokale dev-vars. Geen waarde in git, terminaloutput, URL of browserbundel. |
 | E-mail | Cloudflare `EMAIL`-binding en `EMAIL_FROM` met ingericht domein en op Free vooraf geverifieerde ontvangers, echte uitnodigings- en OTP-proef, quota en onzekere verzenduitkomst bekeken. Geen test-mailopvang in productie. |
-| Jobs | Beide queues hebben werkende consumers en elk een aparte dead-letterqueue. Voorstel: `picnic-imports-dead-production` en `picnic-additions-dead-production`; in test respectievelijk `picnic-imports-dead-test` en `picnic-additions-dead-test`, lokaal `picnic-imports-dead-local` en `picnic-additions-dead-local`. D1 blijft de duurzame taakwaarheid; een onbekende externe toevoeguitkomst wordt nooit blind opnieuw verstuurd. |
+| Jobs | Drie productiequeues (imports, AI en additions) hebben ieder een consumer en een afzonderlijke dead-letterqueue. De bindings staan in `wrangler.jsonc`; D1 blijft de duurzame taakwaarheid. Een onbekende externe toevoeguitkomst wordt nooit blind opnieuw verstuurd. |
 | Kosten en runtime | Representatieve warme en koude paden op echte Workers Free meten: p95 CPU onder 7 ms en geen aanroep boven 10 ms in de testset. D1/R2/Queues-gebruik en Cloudflare-mailbeperkingen volgen. Een betaald plan vraagt een afzonderlijk kostenbesluit. |
 | Herstel en privacy | R2-lifecycle voor tombstones/back-ups, D1-herstelproef met herhaalde verwijderlijst, echte accountverwijdering inclusief R2 en leveranciersretentie gecontroleerd volgens [privacyoperaties](PRIVACY-OPERATIONS.md). |
 | Leveranciers en product | Echte Picnic-koppeling/SMS, productvelden, veilige toevoeg- en herstelproef met eigen account, voorwaarden/toelaatbaarheid, URL- en uploadbeveiliging, AI-budget en mobiele acceptatiematrix beoordeeld. |
@@ -133,6 +131,8 @@ van de 24-uurs- en 30-dagenbewaarclaims.
 
 ## Cloudflare-mail voor de besloten MVP
 
-Resend is vervangen door Cloudflare Email Service. De ontwikkelbinding gebruikt `remote: true` en kan dus echte e-mail versturen zodra de CLI is ingelogd. Test heeft geen remote-mailbinding en gebruikt expliciete fixtures. Alleen `noreply@devstef.nl` is als afzender toegestaan. Er is geen aparte e-mail-API-sleutel nodig. Publieke DNS bevestigt dat devstef.nl Cloudflare-nameservers gebruikt; accountcontrole en domeinonboarding wachten nog op hernieuwde Cloudflare-login. Er is nog geen live verzendproef geslaagd.
+Resend is vervangen door Cloudflare Email Service. De ontwikkelbinding gebruikt `remote: true` en kan dus echte e-mail versturen zodra de CLI is ingelogd. Test heeft geen remote-mailbinding en gebruikt expliciete fixtures. Alleen `noreply@devstef.nl` is als afzender toegestaan. Er is geen aparte e-mail-API-sleutel nodig. Op 8 oktober 2026 zijn browser- en lokale Wrangler-login bevestigd. devstef.nl heeft Email Routing Enabled en DNS Locked, met MX/SPF/DKIM; vooraf waren er geen MX-records. Het Gmail-adres van de eigenaar is geverifieerd. Eén echte test met dezelfde native EMAIL.send-payload als de app leverde een messageId op (accepted=true). Ontvangst in de inbox is nog niet door de gebruiker bevestigd; de volledige OTP-aanmeldflow is hiermee nog niet getest. Er zijn geen doorstuurregels aangemaakt.
+
+Voor remote bindings heeft deze Wrangler-versie `workers_scripts:write` nodig naast `account:read` en `user:read`; alleen `workers:write` gaf HTTP 403 op het bestaande Workers-subdomein. De gebruiker heeft Workers-wijzigingsrechten expliciet goedgekeurd. Het bestaande subdomein stefvandijk10.workers.dev is hergebruikt. De tijdelijke lokale testserver is na één bericht gestopt; geen productiedeploy.
 
 De gratis route vereist vooraf geverifieerde ontvangers. Vrije verzending vereist Workers Paid; er is nog geen betaald plan geactiveerd. Bestaande inkomende mail/MX-records mogen niet zonder noodzaak worden vervangen.

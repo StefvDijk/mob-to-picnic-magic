@@ -1,5 +1,7 @@
 # Picnic projectstatus en vervolgplan
 
+> Actuele eerste release: [PILOT-RELEASE.md](PILOT-RELEASE.md). Doel: besloten test op picnic.devstef.nl, eerst eigenaar + één tester. Dit document bevat ook historische stand of uitgebreidere backlog; de releasespecificatie bepaalt wat nu nodig is.
+
 Hersteld op 7 oktober 2026, bijgewerkt op 8 oktober 2026. De gebruiker heeft het [bouwplan](BOUWPLAN.md) goedgekeurd en opdracht gegeven een eerste MVP te bouwen met managers en goedkopere uitvoerders. De bouw is gestart op `codex/picnic-mvp`; actuele voortgang en testbewijs staan in [implementatiestatus](IMPLEMENTATION-STATUS.md). De eerste lokale Workers-basis is gebouwd en gecontroleerd. De volledige app en externe toelatingsproeven zijn nog niet afgerond.
 
 ## Werkwijze vanaf 8 oktober

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "schema-demo-synthetic-v1",
+  "recipes": [{
+    "id": "demo-1", "title": "Synthetic rice", "servings": "4", "latencyMs": 31000, "costCents": 2, "corrections": 1,
+    "ingredients": [
+      { "sourceId": "rice", "canonicalName": "rijst", "form": "droog", "quantity": { "amount": "250", "unit": "g", "basis": null }, "candidateProductIds": ["demo-rice"], "selection": { "productId": "demo-rice", "packCount": 2, "automatic": true } },
+      { "sourceId": "extra", "canonicalName": "suiker", "form": "kristal", "quantity": { "amount": "1", "unit": "g", "basis": null }, "candidateProductIds": [], "selection": null }
+    ]
+  }]
+}

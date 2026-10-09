@@ -1,5 +1,7 @@
 # Van recept naar Picnic: plan voor de pilot
 
+> Actuele eerste release: [PILOT-RELEASE.md](PILOT-RELEASE.md). Doel: besloten test op picnic.devstef.nl, eerst eigenaar + één tester. Dit document bevat ook historische stand of uitgebreidere backlog; de releasespecificatie bepaalt wat nu nodig is.
+
 Samengesteld op 8 oktober 2026 uit de herstelde gesprekken, bevestigde keuzes en technisch bronnenonderzoek. De specificatie is nu samenhangend genoeg om uitvoering te plannen. Er is nog geen nieuwe app gebouwd, betaald abonnement geactiveerd of productieomgeving ingericht.
 
 ## Het product

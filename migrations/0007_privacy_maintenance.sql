@@ -17,13 +17,13 @@ CREATE TABLE account_purge_guards (
   checked_at INTEGER NOT NULL
 );
 CREATE TRIGGER account_purge_guards_validate BEFORE INSERT ON account_purge_guards BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM deletion_tasks d JOIN app_accounts a ON a.id=d.owner_id
     WHERE d.owner_id=NEW.owner_id AND d.status='running' AND d.lease_token=NEW.lease_token
       AND d.lease_expires_at>NEW.checked_at AND d.r2_verified_at IS NOT NULL
       AND a.status='deleting'
       AND NOT EXISTS(SELECT 1 FROM uploads u WHERE u.owner_id=d.owner_id AND u.status!='deleted')
-  ) THEN RAISE(ABORT,'account_purge_lease_lost') END;
+  ) THEN RAISE(ABORT,'account_purge_lease_lost') END);
 END;
 
 -- A stale reserved upload needs a durable claim before R2 deletion. Record its
@@ -45,44 +45,44 @@ WHEN NEW.deleting_from_reserved!=OLD.deleting_from_reserved AND NOT (
 DROP TRIGGER uploads_usage_transition;
 CREATE TRIGGER uploads_usage_transition AFTER UPDATE OF status ON uploads WHEN OLD.status!=NEW.status BEGIN
   UPDATE user_upload_usage SET
-    reserved_bytes=reserved_bytes-CASE WHEN (OLD.status='reserved' AND NEW.status IN ('stored','deleted')) OR
-      (OLD.status='deleting' AND OLD.deleting_from_reserved=1 AND NEW.status='deleted') THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes+CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size
-      WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' AND OLD.deleting_from_reserved=0 THEN -OLD.byte_size ELSE 0 END
+    reserved_bytes=reserved_bytes-(CASE WHEN (OLD.status='reserved' AND NEW.status IN ('stored','deleted')) OR
+      (OLD.status='deleting' AND OLD.deleting_from_reserved=1 AND NEW.status='deleted') THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes+(CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size
+      WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' AND OLD.deleting_from_reserved=0 THEN -OLD.byte_size ELSE 0 END)
     WHERE owner_id=OLD.owner_id;
   UPDATE app_upload_usage SET
-    reserved_bytes=reserved_bytes-CASE WHEN (OLD.status='reserved' AND NEW.status IN ('stored','deleted')) OR
-      (OLD.status='deleting' AND OLD.deleting_from_reserved=1 AND NEW.status='deleted') THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes+CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size
-      WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' AND OLD.deleting_from_reserved=0 THEN -OLD.byte_size ELSE 0 END
+    reserved_bytes=reserved_bytes-(CASE WHEN (OLD.status='reserved' AND NEW.status IN ('stored','deleted')) OR
+      (OLD.status='deleting' AND OLD.deleting_from_reserved=1 AND NEW.status='deleted') THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes+(CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size
+      WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' AND OLD.deleting_from_reserved=0 THEN -OLD.byte_size ELSE 0 END)
     WHERE singleton=1;
 END;
 DROP TRIGGER uploads_usage_delete;
 CREATE TRIGGER uploads_usage_delete AFTER DELETE ON uploads BEGIN
-  UPDATE user_upload_usage SET reserved_bytes=reserved_bytes-CASE WHEN OLD.status='reserved' OR
-    (OLD.status='deleting' AND OLD.deleting_from_reserved=1) THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes-CASE WHEN OLD.status='stored' OR (OLD.status='deleting' AND OLD.deleting_from_reserved=0) THEN OLD.byte_size ELSE 0 END
+  UPDATE user_upload_usage SET reserved_bytes=reserved_bytes-(CASE WHEN OLD.status='reserved' OR
+    (OLD.status='deleting' AND OLD.deleting_from_reserved=1) THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes-(CASE WHEN OLD.status='stored' OR (OLD.status='deleting' AND OLD.deleting_from_reserved=0) THEN OLD.byte_size ELSE 0 END)
     WHERE owner_id=OLD.owner_id;
-  UPDATE app_upload_usage SET reserved_bytes=reserved_bytes-CASE WHEN OLD.status='reserved' OR
-    (OLD.status='deleting' AND OLD.deleting_from_reserved=1) THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes-CASE WHEN OLD.status='stored' OR (OLD.status='deleting' AND OLD.deleting_from_reserved=0) THEN OLD.byte_size ELSE 0 END
+  UPDATE app_upload_usage SET reserved_bytes=reserved_bytes-(CASE WHEN OLD.status='reserved' OR
+    (OLD.status='deleting' AND OLD.deleting_from_reserved=1) THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes-(CASE WHEN OLD.status='stored' OR (OLD.status='deleting' AND OLD.deleting_from_reserved=0) THEN OLD.byte_size ELSE 0 END)
     WHERE singleton=1;
 END;
 
 -- This applies to direct SQL as well as repository helpers. The account status
 -- and upload transition are checked by SQLite in the same write.
 CREATE TRIGGER uploads_active_account_insert BEFORE INSERT ON uploads BEGIN
-  SELECT CASE WHEN NEW.object_key GLOB 'private/account-tombstones/*'
-    THEN RAISE(ABORT,'reserved_object_key') END;
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NEW.object_key GLOB 'private/account-tombstones/*'
+    THEN RAISE(ABORT,'reserved_object_key') END);
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM app_accounts WHERE id=NEW.owner_id AND status='active'
-  ) THEN RAISE(ABORT,'upload_account_inactive') END;
+  ) THEN RAISE(ABORT,'upload_account_inactive') END);
 END;
 CREATE TRIGGER uploads_active_account_store BEFORE UPDATE OF status ON uploads
 WHEN NEW.status='stored' BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM app_accounts WHERE id=NEW.owner_id AND status='active'
-  ) THEN RAISE(ABORT,'upload_account_inactive') END;
+  ) THEN RAISE(ABORT,'upload_account_inactive') END);
 END;
 
 CREATE INDEX imports_draft_retention_idx ON imports(status,updated_at);

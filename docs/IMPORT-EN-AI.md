@@ -4,7 +4,7 @@ Ontwerpkeuzes van 8 oktober 2026. De app herkent een recept en laat de gebruiker
 
 ## Importstappen
 
-1. Maak een persoonlijk importconcept en valideer de bron: openbare link, tekst of foto/screenshot. De gebruiker kan zonder Picnic-koppeling beginnen.
+1. Maak een persoonlijk importconcept en valideer de bron: openbare link of foto/screenshot. De gebruiker kan zonder Picnic-koppeling beginnen.
 2. Haal bij een link eerst bruikbare receptgegevens uit de pagina, waaronder gestructureerde receptdata. Een betaalmuur wordt niet omzeild; toon de mogelijkheid tekst of een eigen screenshot aan te leveren.
 3. Verwijder identieke technische duplicaten, maar behoud verschillende receptonderdelen met hun eigen ingrediënten. Bij meerdere recepten laat de gebruiker kiezen. Bewaar bron, titel, porties en oorspronkelijke ingrediënttekst.
 4. Gebruik AI alleen waar herkenning nodig is. Geef uitsluitend begrensde broninhoud mee en vraag een vast schema met bronverwijzingen, hoeveelheidssoort, ingrediënten, kenmerken en beschikbare stappen.
@@ -29,7 +29,7 @@ GPT-6 Luna is de eerste te toetsen kandidaat, geen bewezen kwaliteitskeuze. De o
 
 De herkenningsproef omvat de twee [referentierecepten](PROJECTSTATUS.md), Nederlandse en Engelse tekst, dubbele bronlijsten, kleine tekst in foto's, verschillende receptonderdelen, ontbrekende porties en globale maten. Kritieke fouten mogen niet stilzwijgend doorgaan: een slecht leesbare hoeveelheid moet worden gemarkeerd. Een perfect geldig JSON-schema bewijst geen inhoudelijke juistheid. [Gestructureerde uitvoer](https://developers.openai.com/api/docs/guides/structured-outputs).
 
-Maximaal één herstelpoging per import, alleen als de vorige uitkomst vaststaat en het budget dat toelaat. Geen stil opschalen naar een duurder model en geen retry na een onzekere time-out. Bij onvoldoende kwaliteit of budget blijft handmatig invoeren en corrigeren beschikbaar.
+Maximaal één herstelpoging per import, alleen als de vorige uitkomst vaststaat en het budget dat toelaat. Geen stil opschalen naar een duurder model en geen retry na een onzekere time-out. Bij onvoldoende kwaliteit of budget stopt herkenning met een duidelijke reden; de gebruiker kan een beter leesbare foto of andere link aanleveren. Een leeg handmatig formulier is geen uitwijkroute.
 
 ## Harde interne budgetgrenzen
 
@@ -47,7 +47,7 @@ Rekenvoorbeeld met het onderzochte tarief: 24.000 invoertokens en 6.000 uitvoert
 
 ## E-mail- en opslagquota
 
-De server reserveert een verzendslot vóór een e-mail wordt aangeboden. Eigen grens: 90 e-mails per dag en 2.700 per maand voor deze pilot, met ruimte onder de onderzochte Resend Free-limieten. Gebruik binnen hetzelfde leveranciersaccount telt mee bij de controle; er is geen garantie dat andere projecten die marge vrijlaten. Een onzekere verzenduitkomst telt mee en wordt niet blind herhaald.
+De server reserveert een verzendslot vóór een e-mail wordt aangeboden. Eigen grens: 90 e-mails per dag en 2.700 per maand voor deze pilot, als eigen pilotlimiet naast de Cloudflare-mailvoorwaarden. Gebruik binnen hetzelfde leveranciersaccount telt mee bij de controle; er is geen garantie dat andere projecten die marge vrijlaten. Een onzekere verzenduitkomst telt mee en wordt niet blind herhaald.
 
 Naast de adreslimieten uit [accounts](ACCOUNTS.md) kiezen we aanvankelijk maximaal 20 codeverzoeken per uur per netwerkbron, met neutrale foutmelding en monitoring op gedeelde netwerken. Quota-uitputting geeft een begrijpelijk tijdelijk stopbericht; bestaande geldige sessies blijven bruikbaar. Uitnodigingen en herstelcodes delen de verzendbegroting. Er worden nu geen e-mails verstuurd of abonnementen aangezet.
 

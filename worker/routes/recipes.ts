@@ -161,7 +161,7 @@ function publicAttributes(raw: string): Record<string, unknown> {
   const { quantityBasis: _basis, ...attributes } = safeObject(raw);
   return attributes;
 }
-async function loadRecipe(env: AuthEnv, ownerId: string, id: string, includeSource = true): Promise<RecipeDto | null> {
+export async function loadRecipe(env: AuthEnv, ownerId: string, id: string, includeSource = true): Promise<RecipeDto | null> {
   const row = await env.DB.prepare(`SELECT id,title,source_label AS sourceLabel,source_url AS sourceUrl,
     base_servings_num AS baseServingsNum,base_servings_den AS baseServingsDen,version,steps_json AS stepsJson,
     created_at AS createdAt,updated_at AS updatedAt FROM recipes WHERE owner_id=? AND id=? AND deleted_at IS NULL`)
@@ -266,6 +266,20 @@ async function createRecipe(request: Request, env: AuthEnv, principal: Principal
   const hasImportSource = !!body && Object.prototype.hasOwnProperty.call(body, 'importSource');
   const importSource = hasImportSource ? parseImportSource(body!.importSource) : null;
   if (hasImportSource && !importSource) return fail(400, 'INVALID_IMPORT_SOURCE', 'Ongeldige importverwijzing.');
+  // Automatic import adoption has a deterministic owner-scoped ID. Replays and concurrent
+  // effects return the same saved recipe, even if the original import has since expired.
+  const automatic = body?.autoSave === true;
+  if (automatic && (!importSource || importSource.candidateIndex === null)) return fail(400, 'INVALID_IMPORT_SOURCE', 'Kies een herkend recept.');
+  const autoId = automatic ? 'import-' + Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+    new TextEncoder().encode(JSON.stringify([principal.ownerId, importSource!.importId, importSource!.candidateIndex])))))
+    .map(byte => byte.toString(16).padStart(2, '0')).join('') : null;
+  if (autoId) {
+    const prior = await env.DB.prepare(`SELECT rs.recipe_id AS id FROM recipe_sources rs JOIN recipes r ON r.owner_id=rs.owner_id AND r.id=rs.recipe_id
+      WHERE rs.owner_id=? AND rs.import_id=? AND rs.candidate_index=? AND r.deleted_at IS NULL LIMIT 1`)
+      .bind(principal.ownerId, importSource!.importId, importSource!.candidateIndex).first<{ id: string }>();
+    const saved = await loadRecipe(env, principal.ownerId, prior?.id ?? autoId);
+    if (saved) return json({ recipe: saved });
+  }
   let now = (deps.now ?? Date.now)();
   const validatedSource = importSource ? await validateImportSource(env, principal.ownerId, importSource, now) : null;
   if (validatedSource instanceof Response) return validatedSource;
@@ -274,7 +288,7 @@ async function createRecipe(request: Request, env: AuthEnv, principal: Principal
   now = (deps.now ?? Date.now)();
   const freshSource = importSource ? await validateImportSource(env, principal.ownerId, importSource, now) : null;
   if (freshSource instanceof Response) return freshSource;
-  const id = crypto.randomUUID();
+  const id = autoId ?? crypto.randomUUID();
   const servings = servingsColumns(input.baseServings);
   const sourceStatement = validatedSource && importSource ? env.DB.prepare(`INSERT INTO recipe_sources(owner_id,recipe_id,import_id,candidate_index,source_kind,source_label,source_url,source_text,selected_candidate_json,imported_at)
     SELECT ?,?,i.id,?,i.source_kind,COALESCE(i.source_label,i.source_title),i.source_url,
@@ -306,7 +320,15 @@ async function createRecipe(request: Request, env: AuthEnv, principal: Principal
     .bind(principal.ownerId, id, id, principal.ownerId, uploadId))];
   let results: D1Result[];
   try { results = await env.DB.batch(statements); }
-  catch { return fail(400, 'INVALID_RECIPE', 'Controleer de receptgegevens.'); }
+  catch {
+    if (autoId) {
+      const denied = await accessFailure(env, principal);
+      if (denied) return denied;
+      const saved = await loadRecipe(env, principal.ownerId, autoId);
+      if (saved) return json({ recipe: saved });
+    }
+    return fail(400, 'INVALID_RECIPE', 'Controleer de receptgegevens.');
+  }
   const recipeIndex = sourceStatement ? 1 : 0;
   if (results[recipeIndex]?.meta.changes !== 1) {
     const denied = await accessFailure(env, principal);

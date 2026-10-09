@@ -56,15 +56,15 @@ export function AuthPanel({ onAuthenticated, initialEmail = '', onCancel, reveri
 
   return (
     <section className="auth-card" aria-labelledby="auth-title">
-      <p className="eyebrow">Besloten pilot</p>
-      <h1 id="auth-title">{reverify ? 'Bevestig je e-mailadres' : 'Welkom bij je recepten'}</h1>
+      <p className="eyebrow">Jouw eigen kookboek</p>
+      <h1 id="auth-title">{reverify ? 'Bevestig je e-mailadres' : 'Lekker, je bent er.'}</h1>
       <p className="subtle">{reverify
         ? 'Voor deze handeling vragen we een nieuwe e-mailcode.'
-        : 'Log in met het e-mailadres waarop je bent uitgenodigd. Je recepten blijven aan je account gekoppeld.'}</p>
+        : 'Log in met je e-mailadres. Je ontvangt een code, dus een wachtwoord onthouden hoeft niet.'}</p>
       {stage === 'email' ? (
         <form className="form-stack" onSubmit={sendCode}>
           <Label htmlFor={emailId}>E-mailadres</Label>
-          <Input id={emailId} type="email" autoComplete="email" inputMode="email" required
+          <Input id={emailId} placeholder="jij@voorbeeld.nl" type="email" autoComplete="email" inputMode="email" required
             value={email} onChange={event => setEmail(event.target.value)} readOnly={reverify} disabled={pending} />
           <Button type="submit" disabled={pending || !email.trim()}>{pending ? 'Code aanvragen…' : 'Stuur mij een code'}</Button>
         </form>
@@ -83,6 +83,7 @@ export function AuthPanel({ onAuthenticated, initialEmail = '', onCancel, reveri
       )}
       {message && <p className="notice" role="status">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
+      {!reverify && <p className="app-footnote">Mijn recepten is een onafhankelijke testapp met Picnic-koppeling.</p>}
       {onCancel && <Button type="button" variant="outline" onClick={onCancel}>Annuleren</Button>}
     </section>
   );

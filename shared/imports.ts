@@ -1,4 +1,6 @@
-/** Browser-safe contract for the first, non-AI import pass. */
+import type { Quantity } from './quantities';
+
+/** Browser-safe contract for automatic recipe recognition. */
 export type ImportSourceKind = 'text' | 'url' | 'upload';
 export type ImportStatus = 'queued' | 'running' | 'needs_review' | 'failed' | 'saved' | 'expired';
 
@@ -8,9 +10,26 @@ export interface ImportCandidate {
   sourceUrl: string | null;
   baseServings: string | null;
   sections: string[];
-  ingredients: { section: string | null; originalText: string }[];
+  ingredients: ImportIngredientCandidate[];
   steps: string[];
   uncertainty: string[];
+}
+
+export interface ImportIngredientCandidate {
+  section: string | null;
+  originalText: string;
+  normalizedName?: string | null;
+  quantity?: Quantity;
+  attributes?: { form?: string | null; variant?: string | null; brand?: string | null };
+  uncertainty?: string[];
+  sourceQuote?: string | null;
+  sourceOrigin?: 'ai' | 'parser';
+}
+
+export interface ImportRecognitionDto {
+  state: 'pending' | 'counting' | 'reserved' | 'sending' | 'ready' | 'manual' | 'unknown';
+  attemptsUsed: 0 | 1 | 2;
+  reasonCode: string | null;
 }
 
 export interface ImportDto {
@@ -19,10 +38,15 @@ export interface ImportDto {
   sourceUrl: string | null;
   sourceText: string | null;
   sourceLabel: string | null;
+  /** Private image uploads attached to a photo import. */
+  uploadIds?: string[];
   status: ImportStatus;
   candidates: ImportCandidate[];
   uncertainties: string[];
   errorCode: string | null;
+  recognition?: ImportRecognitionDto;
+  /** Server-clock deadline shared by import and initial shopping lookup. */
+  deadlineAt?: number | null;
   expiresAt: number | null;
   createdAt: number;
   updatedAt: number;

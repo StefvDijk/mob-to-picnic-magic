@@ -83,15 +83,15 @@ CREATE INDEX invitations_email_status_idx ON invitations(email, status, expires_
 CREATE INDEX invitations_pending_expiry_idx ON invitations(status, expires_at);
 CREATE UNIQUE INDEX invitations_one_pending_per_email ON invitations(email) WHERE status = 'pending';
 CREATE TRIGGER invitations_reserve_capacity BEFORE INSERT ON invitations WHEN NEW.status = 'pending' BEGIN
-  SELECT CASE WHEN (SELECT COUNT(*) FROM app_accounts WHERE status IN ('active','blocked','deleting')) + (SELECT COUNT(*) FROM invitations WHERE status = 'pending' AND expires_at > NEW.created_at) >= 10 THEN RAISE(ABORT,'pilot_capacity_reached') END;
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM app_accounts WHERE id = NEW.invited_by AND role = 'admin' AND status = 'active') THEN RAISE(ABORT,'admin_required') END;
+  SELECT (CASE WHEN (SELECT COUNT(*) FROM app_accounts WHERE status IN ('active','blocked','deleting')) + (SELECT COUNT(*) FROM invitations WHERE status = 'pending' AND expires_at > NEW.created_at) >= 10 THEN RAISE(ABORT,'pilot_capacity_reached') END);
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM app_accounts WHERE id = NEW.invited_by AND role = 'admin' AND status = 'active') THEN RAISE(ABORT,'admin_required') END);
 END;
 CREATE TRIGGER app_accounts_insert_policy BEFORE INSERT ON app_accounts BEGIN
-  SELECT CASE WHEN NEW.status = 'active' AND NOT (NEW.role = 'admin' AND NEW.invitation_id IS NULL AND NOT EXISTS (SELECT 1 FROM app_accounts)) THEN RAISE(ABORT,'account_requires_invitation') END;
-  SELECT CASE WHEN NEW.status = 'invited' AND NOT EXISTS (SELECT 1 FROM invitations i WHERE i.id = NEW.invitation_id AND i.status = 'pending' AND i.email = NEW.email COLLATE NOCASE AND i.expires_at > NEW.created_at) THEN RAISE(ABORT,'invitation_invalid') END;
+  SELECT (CASE WHEN NEW.status = 'active' AND NOT (NEW.role = 'admin' AND NEW.invitation_id IS NULL AND NOT EXISTS (SELECT 1 FROM app_accounts)) THEN RAISE(ABORT,'account_requires_invitation') END);
+  SELECT (CASE WHEN NEW.status = 'invited' AND NOT EXISTS (SELECT 1 FROM invitations i WHERE i.id = NEW.invitation_id AND i.status = 'pending' AND i.email = NEW.email COLLATE NOCASE AND i.expires_at > NEW.created_at) THEN RAISE(ABORT,'invitation_invalid') END);
 END;
 CREATE TRIGGER app_accounts_status_policy BEFORE UPDATE OF status ON app_accounts WHEN NEW.status = 'active' AND OLD.status = 'invited' BEGIN
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM invitations i WHERE i.id = NEW.invitation_id AND i.status = 'consumed' AND i.consumed_by = NEW.id) THEN RAISE(ABORT,'invitation_not_consumed') END;
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM invitations i WHERE i.id = NEW.invitation_id AND i.status = 'consumed' AND i.consumed_by = NEW.id) THEN RAISE(ABORT,'invitation_not_consumed') END);
 END;
 
 -- A single insert is the invitation consume operation; trigger failures abort the statement.
@@ -102,12 +102,12 @@ CREATE TABLE invitation_consumptions (
   consumed_at INTEGER NOT NULL
 );
 CREATE TRIGGER invitation_consumptions_validate BEFORE INSERT ON invitation_consumptions BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM invitations i JOIN user u ON u.id = NEW.owner_id
     WHERE i.id = NEW.invitation_id AND i.status = 'pending' AND i.expires_at > NEW.consumed_at
       AND i.email = NEW.verified_email COLLATE NOCASE AND u.email = NEW.verified_email COLLATE NOCASE AND u.emailVerified = 1
-  ) THEN RAISE(ABORT,'invitation_invalid_or_consumed') END;
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM app_accounts a WHERE a.id = NEW.owner_id AND a.status = 'invited' AND a.invitation_id = NEW.invitation_id) THEN RAISE(ABORT,'invited_account_missing') END;
+  ) THEN RAISE(ABORT,'invitation_invalid_or_consumed') END);
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM app_accounts a WHERE a.id = NEW.owner_id AND a.status = 'invited' AND a.invitation_id = NEW.invitation_id) THEN RAISE(ABORT,'invited_account_missing') END);
 END;
 CREATE TRIGGER invitation_consumptions_apply AFTER INSERT ON invitation_consumptions BEGIN
   UPDATE invitations SET status = 'consumed', consumed_by = NEW.owner_id, consumed_at = NEW.consumed_at WHERE id = NEW.invitation_id;
@@ -173,8 +173,8 @@ CREATE TABLE user_upload_usage (
   CHECK(used_bytes+reserved_bytes<=cap_bytes)
 );
 CREATE TRIGGER uploads_reserve_quota BEFORE INSERT ON uploads BEGIN
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM user_upload_usage WHERE owner_id=NEW.owner_id AND used_bytes+reserved_bytes+NEW.byte_size<=cap_bytes) THEN RAISE(ABORT,'user_upload_quota_exceeded') END;
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM app_upload_usage WHERE singleton=1 AND used_bytes+reserved_bytes+NEW.byte_size<=cap_bytes) THEN RAISE(ABORT,'app_upload_quota_exceeded') END;
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM user_upload_usage WHERE owner_id=NEW.owner_id AND used_bytes+reserved_bytes+NEW.byte_size<=cap_bytes) THEN RAISE(ABORT,'user_upload_quota_exceeded') END);
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM app_upload_usage WHERE singleton=1 AND used_bytes+reserved_bytes+NEW.byte_size<=cap_bytes) THEN RAISE(ABORT,'app_upload_quota_exceeded') END);
 END;
 CREATE TRIGGER uploads_count_reserved AFTER INSERT ON uploads BEGIN
   UPDATE user_upload_usage SET reserved_bytes=reserved_bytes+NEW.byte_size WHERE owner_id=NEW.owner_id;
@@ -182,21 +182,21 @@ CREATE TRIGGER uploads_count_reserved AFTER INSERT ON uploads BEGIN
 END;
 CREATE TRIGGER uploads_usage_transition AFTER UPDATE OF status ON uploads WHEN OLD.status!=NEW.status BEGIN
   UPDATE user_upload_usage SET
-    reserved_bytes=reserved_bytes - CASE WHEN OLD.status='reserved' AND NEW.status IN ('stored','deleted') THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes + CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' THEN -OLD.byte_size ELSE 0 END
+    reserved_bytes=reserved_bytes - (CASE WHEN OLD.status='reserved' AND NEW.status IN ('stored','deleted') THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes + (CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' THEN -OLD.byte_size ELSE 0 END)
     WHERE owner_id=OLD.owner_id;
   UPDATE app_upload_usage SET
-    reserved_bytes=reserved_bytes - CASE WHEN OLD.status='reserved' AND NEW.status IN ('stored','deleted') THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes + CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' THEN -OLD.byte_size ELSE 0 END
+    reserved_bytes=reserved_bytes - (CASE WHEN OLD.status='reserved' AND NEW.status IN ('stored','deleted') THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes + (CASE WHEN OLD.status='reserved' AND NEW.status='stored' THEN OLD.byte_size WHEN OLD.status IN ('stored','deleting') AND NEW.status='deleted' THEN -OLD.byte_size ELSE 0 END)
     WHERE singleton=1;
 END;
 CREATE TRIGGER uploads_immutable BEFORE UPDATE ON uploads WHEN NEW.id!=OLD.id OR NEW.owner_id!=OLD.owner_id OR NEW.object_key!=OLD.object_key OR NEW.media_type!=OLD.media_type OR NEW.byte_size!=OLD.byte_size BEGIN SELECT RAISE(ABORT,'upload_identity_immutable'); END;
 CREATE TRIGGER uploads_status_machine BEFORE UPDATE OF status ON uploads WHEN NOT ((OLD.status='reserved' AND NEW.status IN ('stored','deleted')) OR (OLD.status='stored' AND NEW.status='deleting') OR (OLD.status='deleting' AND NEW.status='deleted')) BEGIN SELECT RAISE(ABORT,'upload_invalid_transition'); END;
 CREATE TRIGGER uploads_usage_delete AFTER DELETE ON uploads BEGIN
-  UPDATE user_upload_usage SET reserved_bytes=reserved_bytes - CASE WHEN OLD.status='reserved' THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes - CASE WHEN OLD.status IN ('stored','deleting') THEN OLD.byte_size ELSE 0 END WHERE owner_id=OLD.owner_id;
-  UPDATE app_upload_usage SET reserved_bytes=reserved_bytes - CASE WHEN OLD.status='reserved' THEN OLD.byte_size ELSE 0 END,
-    used_bytes=used_bytes - CASE WHEN OLD.status IN ('stored','deleting') THEN OLD.byte_size ELSE 0 END WHERE singleton=1;
+  UPDATE user_upload_usage SET reserved_bytes=reserved_bytes - (CASE WHEN OLD.status='reserved' THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes - (CASE WHEN OLD.status IN ('stored','deleting') THEN OLD.byte_size ELSE 0 END) WHERE owner_id=OLD.owner_id;
+  UPDATE app_upload_usage SET reserved_bytes=reserved_bytes - (CASE WHEN OLD.status='reserved' THEN OLD.byte_size ELSE 0 END),
+    used_bytes=used_bytes - (CASE WHEN OLD.status IN ('stored','deleting') THEN OLD.byte_size ELSE 0 END) WHERE singleton=1;
 END;
 
 CREATE TABLE imports (
@@ -388,21 +388,21 @@ CREATE TABLE approvals (
 );
 CREATE INDEX approvals_owner_time_idx ON approvals(owner_id,approved_at DESC);
 CREATE TRIGGER approvals_validate BEFORE INSERT ON approvals BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM proposals p JOIN connections c ON c.id = p.connection_id AND c.owner_id = p.owner_id
     JOIN app_accounts a ON a.id = p.owner_id
     WHERE p.owner_id = NEW.owner_id AND p.id = NEW.proposal_id AND p.version = NEW.proposal_version
       AND p.status = 'ready' AND p.expires_at > NEW.approved_at
       AND c.status = 'connected' AND c.generation = p.connection_generation
       AND a.status = 'active'
-  ) THEN RAISE(ABORT,'proposal_not_approvable') END;
-  SELECT CASE WHEN NOT EXISTS (
+  ) THEN RAISE(ABORT,'proposal_not_approvable') END);
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM session_metadata sm JOIN session s ON s.id = sm.session_id
     WHERE sm.owner_id = NEW.owner_id AND sm.session_id = NEW.starting_session_id
       AND sm.revoked_at IS NULL AND sm.authenticated_at + 2592000000 > NEW.approved_at
       AND sm.last_activity_at + 1209600000 > NEW.approved_at
       AND s.expiresAt > NEW.approved_at
-  ) THEN RAISE(ABORT,'session_not_approvable') END;
+  ) THEN RAISE(ABORT,'session_not_approvable') END);
 END;
 CREATE TRIGGER approvals_snapshot_immutable BEFORE UPDATE ON approvals WHEN
   NEW.id != OLD.id OR NEW.owner_id != OLD.owner_id OR NEW.proposal_id != OLD.proposal_id OR NEW.proposal_version != OLD.proposal_version OR NEW.starting_session_id != OLD.starting_session_id OR NEW.snapshot_json != OLD.snapshot_json OR NEW.total_price_cents IS NOT OLD.total_price_cents OR NEW.approved_at != OLD.approved_at OR NEW.expires_at != OLD.expires_at
@@ -462,7 +462,7 @@ CREATE TABLE connection_execution_claims (
   FOREIGN KEY(owner_id,action_id,connection_id) REFERENCES actions(owner_id,id,connection_id) ON DELETE CASCADE
 );
 CREATE TRIGGER connection_claim_release_guard BEFORE UPDATE OF state ON connection_execution_claims WHEN NEW.state = 'released' BEGIN
-  SELECT CASE WHEN EXISTS (SELECT 1 FROM execution_lines e WHERE e.owner_id = OLD.owner_id AND e.action_id = OLD.action_id AND e.status IN ('sending','unknown')) THEN RAISE(ABORT,'external_outcome_unresolved') END;
+  SELECT (CASE WHEN EXISTS (SELECT 1 FROM execution_lines e WHERE e.owner_id = OLD.owner_id AND e.action_id = OLD.action_id AND e.status IN ('sending','unknown')) THEN RAISE(ABORT,'external_outcome_unresolved') END);
 END;
 CREATE TABLE outbox (
   id TEXT PRIMARY KEY NOT NULL,
@@ -527,17 +527,17 @@ CREATE TABLE budget_reservations (
 );
 CREATE INDEX budget_reservations_owner_month_idx ON budget_reservations(owner_id,month,state);
 CREATE TRIGGER budget_reservations_check BEFORE INSERT ON budget_reservations BEGIN
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM app_budget_months a JOIN user_budget_months u ON u.month = a.month AND u.owner_id = NEW.owner_id WHERE a.month = NEW.month AND a.reserved_cents + a.spent_cents + NEW.cap_cents <= a.cap_cents AND u.reserved_cents + u.spent_cents + NEW.cap_cents <= u.cap_cents) THEN RAISE(ABORT,'budget_exceeded') END;
-  SELECT CASE WHEN (SELECT COUNT(*) FROM budget_reservations b WHERE b.owner_id=NEW.owner_id AND b.import_id=NEW.import_id) >= 2 THEN RAISE(ABORT,'import_attempt_limit') END;
-  SELECT CASE WHEN (SELECT COALESCE(SUM(CASE WHEN state='settled' THEN actual_cents WHEN state='released' THEN 0 ELSE cap_cents END),0) FROM budget_reservations b WHERE b.owner_id=NEW.owner_id AND b.import_id=NEW.import_id) + NEW.cap_cents > 5 THEN RAISE(ABORT,'import_budget_exceeded') END;
-  SELECT CASE WHEN EXISTS (SELECT 1 FROM budget_reservations b WHERE b.owner_id=NEW.owner_id AND b.import_id=NEW.import_id AND b.state='unknown') THEN RAISE(ABORT,'import_outcome_unknown') END;
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM app_budget_months a JOIN user_budget_months u ON u.month = a.month AND u.owner_id = NEW.owner_id WHERE a.month = NEW.month AND a.reserved_cents + a.spent_cents + NEW.cap_cents <= a.cap_cents AND u.reserved_cents + u.spent_cents + NEW.cap_cents <= u.cap_cents) THEN RAISE(ABORT,'budget_exceeded') END);
+  SELECT (CASE WHEN (SELECT COUNT(*) FROM budget_reservations b WHERE b.owner_id=NEW.owner_id AND b.import_id=NEW.import_id) >= 2 THEN RAISE(ABORT,'import_attempt_limit') END);
+  SELECT (CASE WHEN (SELECT COALESCE(SUM((CASE WHEN state='settled' THEN actual_cents WHEN state='released' THEN 0 ELSE cap_cents END)),0) FROM budget_reservations b WHERE b.owner_id=NEW.owner_id AND b.import_id=NEW.import_id) + NEW.cap_cents > 5 THEN RAISE(ABORT,'import_budget_exceeded') END);
+  SELECT (CASE WHEN EXISTS (SELECT 1 FROM budget_reservations b WHERE b.owner_id=NEW.owner_id AND b.import_id=NEW.import_id AND b.state='unknown') THEN RAISE(ABORT,'import_outcome_unknown') END);
 END;
 CREATE TRIGGER budget_reservations_add AFTER INSERT ON budget_reservations BEGIN
   UPDATE app_budget_months SET reserved_cents = reserved_cents + NEW.cap_cents WHERE month = NEW.month;
   UPDATE user_budget_months SET reserved_cents = reserved_cents + NEW.cap_cents WHERE owner_id = NEW.owner_id AND month = NEW.month;
 END;
 CREATE TRIGGER budget_reservations_settle BEFORE UPDATE OF state ON budget_reservations WHEN OLD.state IN ('reserved','unknown') AND NEW.state = 'settled' BEGIN
-  SELECT CASE WHEN NEW.actual_cents IS NULL OR NEW.actual_cents > OLD.cap_cents THEN RAISE(ABORT,'invalid_budget_settlement') END;
+  SELECT (CASE WHEN NEW.actual_cents IS NULL OR NEW.actual_cents > OLD.cap_cents THEN RAISE(ABORT,'invalid_budget_settlement') END);
 END;
 CREATE TRIGGER budget_reservations_release BEFORE UPDATE OF state ON budget_reservations WHEN OLD.state = 'reserved' AND NEW.state = 'released' BEGIN
   UPDATE app_budget_months SET reserved_cents = reserved_cents - OLD.cap_cents WHERE month = OLD.month;
@@ -599,24 +599,24 @@ CREATE TABLE email_sends (
 );
 CREATE INDEX email_sends_address_time_idx ON email_sends(address_hash,created_at DESC);
 CREATE TRIGGER email_sends_reserve BEFORE INSERT ON email_sends BEGIN
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM email_send_usage WHERE period=NEW.daily_period) THEN RAISE(ABORT,'email_daily_quota_missing') END;
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM email_send_usage WHERE period=NEW.monthly_period) THEN RAISE(ABORT,'email_monthly_quota_missing') END;
-  SELECT CASE WHEN (SELECT sent_count+reserved_count FROM email_send_usage WHERE period=NEW.daily_period) >= (SELECT cap_count FROM email_send_usage WHERE period=NEW.daily_period) THEN RAISE(ABORT,'email_daily_quota_exceeded') END;
-  SELECT CASE WHEN (SELECT sent_count+reserved_count FROM email_send_usage WHERE period=NEW.monthly_period) >= (SELECT cap_count FROM email_send_usage WHERE period=NEW.monthly_period) THEN RAISE(ABORT,'email_monthly_quota_exceeded') END;
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM email_send_usage WHERE period=NEW.daily_period) THEN RAISE(ABORT,'email_daily_quota_missing') END);
+  SELECT (CASE WHEN NOT EXISTS (SELECT 1 FROM email_send_usage WHERE period=NEW.monthly_period) THEN RAISE(ABORT,'email_monthly_quota_missing') END);
+  SELECT (CASE WHEN (SELECT sent_count+reserved_count FROM email_send_usage WHERE period=NEW.daily_period) >= (SELECT cap_count FROM email_send_usage WHERE period=NEW.daily_period) THEN RAISE(ABORT,'email_daily_quota_exceeded') END);
+  SELECT (CASE WHEN (SELECT sent_count+reserved_count FROM email_send_usage WHERE period=NEW.monthly_period) >= (SELECT cap_count FROM email_send_usage WHERE period=NEW.monthly_period) THEN RAISE(ABORT,'email_monthly_quota_exceeded') END);
 END;
 CREATE TRIGGER email_sends_count AFTER INSERT ON email_sends BEGIN
   UPDATE email_send_usage SET reserved_count=reserved_count+1 WHERE period IN (NEW.daily_period,NEW.monthly_period);
 END;
 CREATE TRIGGER email_sends_settle BEFORE UPDATE OF status ON email_sends WHEN OLD.status='reserved' AND NEW.status IN ('sent','unknown','failed') BEGIN
   UPDATE email_send_usage SET reserved_count=reserved_count-1,
-    sent_count=sent_count + CASE WHEN NEW.status IN ('sent','unknown') THEN 1 ELSE 0 END
+    sent_count=sent_count + (CASE WHEN NEW.status IN ('sent','unknown') THEN 1 ELSE 0 END)
     WHERE period IN (OLD.daily_period,OLD.monthly_period);
 END;
 CREATE TRIGGER email_sends_immutable BEFORE UPDATE ON email_sends WHEN NEW.id!=OLD.id OR NEW.address_hash!=OLD.address_hash OR NEW.daily_period!=OLD.daily_period OR NEW.monthly_period!=OLD.monthly_period OR NEW.created_at!=OLD.created_at BEGIN SELECT RAISE(ABORT,'email_send_identity_immutable'); END;
 CREATE TRIGGER email_sends_status_machine BEFORE UPDATE OF status ON email_sends WHEN NOT (OLD.status='reserved' AND NEW.status IN ('sent','unknown','failed')) BEGIN SELECT RAISE(ABORT,'email_send_invalid_transition'); END;
 
 CREATE TRIGGER actions_validate BEFORE INSERT ON actions BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM approvals ap JOIN proposals p ON p.owner_id = ap.owner_id AND p.id = ap.proposal_id
     JOIN connections c ON c.owner_id = p.owner_id AND c.id = p.connection_id
     JOIN app_accounts a ON a.id = p.owner_id
@@ -626,17 +626,17 @@ CREATE TRIGGER actions_validate BEFORE INSERT ON actions BEGIN
       AND c.id = NEW.connection_id AND c.status = 'connected'
       AND c.generation = NEW.connection_generation AND p.connection_generation = c.generation
       AND a.status = 'active'
-  ) THEN RAISE(ABORT,'approval_not_executable') END;
+  ) THEN RAISE(ABORT,'approval_not_executable') END);
 END;
 CREATE TRIGGER actions_identity_immutable BEFORE UPDATE ON actions WHEN
   NEW.id != OLD.id OR NEW.owner_id != OLD.owner_id OR NEW.approval_id != OLD.approval_id OR NEW.proposal_id != OLD.proposal_id OR NEW.connection_id != OLD.connection_id OR NEW.connection_generation != OLD.connection_generation OR NEW.created_at != OLD.created_at
 BEGIN SELECT RAISE(ABORT,'action_identity_immutable'); END;
 CREATE TRIGGER actions_terminal_guard BEFORE UPDATE OF state ON actions WHEN NEW.state IN ('succeeded','partial','stopped','resolved') BEGIN
-  SELECT CASE WHEN EXISTS (SELECT 1 FROM execution_lines e WHERE e.owner_id=OLD.owner_id AND e.action_id=OLD.id AND e.status IN ('sending','unknown')) THEN RAISE(ABORT,'execution_lines_unresolved') END;
-  SELECT CASE WHEN NEW.state IN ('succeeded','resolved') AND EXISTS (SELECT 1 FROM execution_lines e WHERE e.owner_id=OLD.owner_id AND e.action_id=OLD.id AND e.status='unsent') THEN RAISE(ABORT,'execution_lines_unresolved') END;
+  SELECT (CASE WHEN EXISTS (SELECT 1 FROM execution_lines e WHERE e.owner_id=OLD.owner_id AND e.action_id=OLD.id AND e.status IN ('sending','unknown')) THEN RAISE(ABORT,'execution_lines_unresolved') END);
+  SELECT (CASE WHEN NEW.state IN ('succeeded','resolved') AND EXISTS (SELECT 1 FROM execution_lines e WHERE e.owner_id=OLD.owner_id AND e.action_id=OLD.id AND e.status='unsent') THEN RAISE(ABORT,'execution_lines_unresolved') END);
 END;
 CREATE TRIGGER execution_lines_validate_sending BEFORE UPDATE OF status ON execution_lines WHEN NEW.status = 'sending' BEGIN
-  SELECT CASE WHEN OLD.status != 'unsent' OR NOT EXISTS (
+  SELECT (CASE WHEN OLD.status != 'unsent' OR NOT EXISTS (
     SELECT 1 FROM actions ac JOIN approvals ap ON ap.owner_id = ac.owner_id AND ap.id = ac.approval_id
     JOIN connections c ON c.owner_id = ac.owner_id AND c.id = ac.connection_id
     JOIN app_accounts a ON a.id = ac.owner_id
@@ -647,5 +647,5 @@ CREATE TRIGGER execution_lines_validate_sending BEFORE UPDATE OF status ON execu
       AND c.status = 'connected' AND c.generation = ac.connection_generation AND a.status = 'active'
       AND sm.revoked_at IS NULL AND sm.authenticated_at + 2592000000 > NEW.attempt_started_at
       AND sm.last_activity_at + 1209600000 > NEW.attempt_started_at AND s.expiresAt > NEW.attempt_started_at
-  ) THEN RAISE(ABORT,'execution_not_sendable') END;
+  ) THEN RAISE(ABORT,'execution_not_sendable') END);
 END;

@@ -13,3 +13,12 @@ PICNIC_ENCRYPTION_KEY=""
 # Real email sending also requires a verified sender domain. Leave empty for
 # tests with an explicitly injected local email provider; no automatic fallback.
 # Inlogmail gebruikt de Cloudflare EMAIL-binding; afzender staat in wrangler.jsonc.
+
+# Automatic URL/photo recognition. Never put this key in VITE_* variables.
+OPENAI_API_KEY=""
+# Set the model-prices-verified attestation after checking current model rates.
+# This does not attest undocumented input-token-count billing/retention.
+AI_PRICE_ATTESTATION=""
+AI_PRICE_VALID_UNTIL=""
+# Conservative EUR/USD conversion including headroom (15000 = 1.5 EUR/USD).
+AI_EUR_PER_USD_BPS="15000"

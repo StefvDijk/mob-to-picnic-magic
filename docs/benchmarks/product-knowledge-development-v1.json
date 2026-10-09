@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "evidence": "15 manually specified development ingredient-product pairs from existing observations. Labels express acceptable automatic use, not exact negative status. Not a held-out recipe benchmark. Source payloads stay in local SQLite outside Git.",
+  "cases": [
+    {"productId":"s1003179","kind":"coconut-yoghurt","automatic":true},
+    {"productId":"s1006357","kind":"cinnamon","form":"poeder","automatic":true},
+    {"productId":"s1000206","kind":"oregano-fresh","automatic":true},
+    {"productId":"s1160729","kind":"mango","automatic":true},
+    {"productId":"s1014666","kind":"mango","automatic":true},
+    {"productId":"s1173086","kind":"coconut-yoghurt","automatic":true},
+    {"productId":"s1016962","kind":"mango","automatic":false},
+    {"productId":"s1153984","kind":"mango","automatic":false},
+    {"productId":"s1125255","kind":"mango","automatic":false},
+    {"productId":"s1066386","kind":"vanilla-paste","automatic":false},
+    {"productId":"s1108761","kind":"vanilla-paste","automatic":false},
+    {"productId":"s1006698","kind":"oregano-fresh","automatic":false},
+    {"productId":"s1090163","kind":"cinnamon","form":"poeder","automatic":false},
+    {"productId":"s1008721","kind":"cinnamon","form":"poeder","automatic":false},
+    {"productId":"s1176231","kind":"kefir","automatic":false}
+  ]
+}

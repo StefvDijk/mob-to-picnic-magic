@@ -31,3 +31,6 @@ test-results/
 *.njsproj
 *.sln
 *.sw?
+
+# Independent production authentication-key recovery backup
+.production-secrets/

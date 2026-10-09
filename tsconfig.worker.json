@@ -11,5 +11,6 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["worker/**/*.ts", "worker/runtime.d.ts", "test/**/*.ts", "shared/**/*.ts"]
+  "include": ["worker/**/*.ts", "worker/runtime.d.ts", "test/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["test/import-photo.test.ts"]
 }

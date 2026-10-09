@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "schema-demo-synthetic-v1",
+  "evidence": "Invented schema demo only; no real recipe or independently labelled quality evidence.",
+  "recipes": [{
+    "id": "demo-1", "title": "Synthetic rice", "servings": "4", "split": "development",
+    "sourceHash": "synthetic-no-real-source", "language": "nl", "sourceKind": "synthetic",
+    "ingredients": [
+      { "sourceId": "rice", "canonicalName": "rijst", "form": "droog", "quantity": { "amount": "200", "unit": "g", "basis": null }, "required": true, "available": true, "acceptableProducts": [{ "productId": "demo-rice", "packCounts": [1] }] },
+      { "sourceId": "onion", "canonicalName": "ui", "form": "vers", "quantity": { "amount": "1", "unit": "piece", "basis": null }, "required": true, "available": true, "acceptableProducts": [{ "productId": "demo-onion", "packCounts": [1] }] }
+    ]
+  }]
+}

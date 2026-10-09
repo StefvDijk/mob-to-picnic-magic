@@ -97,6 +97,20 @@ beforeAll(async () => {
 });
 
 describe('authenticated recipe routes with D1', () => {
+  it('automatically adopts the same candidate once across concurrent requests and retries after expiry', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const importId = await seedImport(owner!.id);
+    const body = { ...recipeInput('Automatic import'), autoSave: true, importSource: { importId, candidateIndex: 0 } };
+    const responses = await Promise.all([1, 2].map(() => handleRecipes(request('/api/recipes', 'POST', body, memberCookie), testEnv)));
+    const results = await Promise.all(responses.map(response => response!.json() as Promise<{ recipe: { id: string } }>));
+    expect(results[0].recipe.id).toBe(results[1].recipe.id);
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM recipe_sources WHERE owner_id=? AND import_id=?`).bind(owner!.id, importId).first()).toEqual({ count: 1 });
+    await db.prepare(`UPDATE imports SET expires_at=1 WHERE id=?`).bind(importId).run();
+    const retry = await handleRecipes(request('/api/recipes', 'POST', body, memberCookie), testEnv);
+    expect(retry?.status).toBe(200);
+    expect(await retry!.json()).toMatchObject({ recipe: { id: results[0].recipe.id } });
+  });
+
   it('saves immutable source snapshots for selected and manual candidates and omits them from lists', async () => {
     const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
     const importId = await seedImport(owner!.id);

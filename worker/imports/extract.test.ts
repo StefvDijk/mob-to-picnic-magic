@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractRecipeCandidates, textImportResult } from './extract';
-import { validateImportUrl } from './processor';
+import { validateImportUrl, readablePageText } from './processor';
 
 describe('first import extraction', () => {
   it('keeps distinct recipe choices and ingredient sections while removing exact JSON-LD duplicates', () => {
@@ -47,4 +47,12 @@ describe('first import extraction', () => {
       'https://culy.nl:8443/a', 'https://127.0.0.1/a', 'https://localhost/a',
     ]) expect(validateImportUrl(url)).toBeNull();
   });
+});
+
+it('removes navigation and footers without dropping recipe ingredients outside the article', () => {
+  const text = readablePageText('<nav>Menu</nav><article><h1>Soep</h1><p>Kook alles.</p></article><aside>2 tomaten</aside><footer>Nieuwsbrief</footer>');
+  expect(text).toContain('Soep');
+  expect(text).toContain('2 tomaten');
+  expect(text).not.toContain('Menu');
+  expect(text).not.toContain('Nieuwsbrief');
 });

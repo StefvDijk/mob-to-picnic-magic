@@ -1,11 +1,13 @@
+import { unitPriceForPacks } from '../../shared/product-pricing';
 import type { AuthEnv } from '../auth';
 import { claimAction, completeExecutionLine, finishAction, markStaleSendingUnknown, sessionExpiryMillisSql } from '../db';
-import { addPicnicProduct } from '../adapters/picnic';
+import { addPicnicProduct, createAbortablePicnicProvider, type PicnicProvider } from '../adapters/picnic';
 import { decryptCredential, type PicnicKeyEnv } from '../security/credentials';
+import { checkCurrentProduct } from '../catalog/current';
 
 const STALE_MS = 60_000;
 type ActionEnv = AuthEnv & PicnicKeyEnv;
-export type AdditionDependencies = { add?: typeof addPicnicProduct; now?: () => number };
+export type AdditionDependencies = { add?: typeof addPicnicProduct; provider?: PicnicProvider; now?: () => number };
 export type AdditionTaskOutcome = 'done' | 'busy';
 
 interface ActionRow {
@@ -153,6 +155,23 @@ export async function processAdditionTask(
         .bind(now, action.ownerId, action.id, line.id).run();
       await stopAction(env, action, now);
       return 'done';
+    }
+    // New shopping selections are checked immediately before sending. Missing SKUs
+    // are demonstrably unsent; preserve the rest of the selection, without substitution.
+    const snapshot = JSON.parse(line.productSnapshot) as { shopping?: boolean; query?: string; priceCents?: number; contentFingerprint?: string; checkSource?: string };
+    if (snapshot.shopping && snapshot.query) {
+      let product;
+      try {
+        const checked = await checkCurrentProduct(deps.provider ?? createAbortablePicnicProvider(), authKey, productId, snapshot.query);
+        if (snapshot.contentFingerprint && (checked.source !== snapshot.checkSource || checked.contentFingerprint !== snapshot.contentFingerprint)) throw new Error('PRODUCT_CONTENT_CHANGED');
+        product = checked.product;
+      }
+      catch { product = undefined; }
+      if (!product || product.isAvailable === false || product.maxCount !== undefined && line.packCount > product.maxCount || product.priceCertainty !== 'known' || unitPriceForPacks(product, line.packCount) !== snapshot.priceCents) {
+        await env.DB.prepare(`UPDATE execution_lines SET status='not_added',completed_at=? WHERE owner_id=? AND action_id=? AND id=? AND status='unsent'`)
+          .bind((deps.now ?? Date.now)(), action.ownerId, action.id, line.id).run();
+        continue;
+      }
     }
     let sending: boolean;
     try { sending = await markSending(env, action, line, crypto.randomUUID(), (deps.now ?? Date.now)()); }

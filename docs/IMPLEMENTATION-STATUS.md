@@ -1,5 +1,7 @@
 # MVP uitvoering
 
+> Actuele eerste release: [PILOT-RELEASE.md](PILOT-RELEASE.md). Doel: besloten test op picnic.devstef.nl, eerst eigenaar + één tester. Dit document bevat ook historische stand of uitgebreidere backlog; de releasespecificatie bepaalt wat nu nodig is.
+
 > Herprioritering 8 oktober: [MVP-FOCUS.md](MVP-FOCUS.md) bepaalt nu de eerste oplevergrens. Het volledige bouwplan is de backlog. Het onafgeronde AI-werk is apart bewaard in Git-stash `Park AI text recognition for focused MVP; original Picnic service excluded`. De route recept → productvoorstel → goedgekeurde Picnic-mand krijgt voorrang. Onderstaande bewijsregistratie is historische status, geen lijst van verplichte nieuwe reviewrondes.
 
 Start 8 oktober 2026. De gebruiker heeft het bouwplan goedgekeurd en opdracht gegeven de MVP met directeur, managers en goedkopere uitvoerders te bouwen. Deze opdracht vervangt de eerdere grens ‘alleen specificeren’. Het volledige [bouwplan](BOUWPLAN.md) blijft de scope; een demonstratie met mocks is geen afgeronde pilot.
@@ -163,3 +165,29 @@ Echte proef nog open: `RESEND_API_KEY` en `EMAIL_FROM` zijn lokaal leeg; de brow
 Op verzoek van de gebruiker gebruikt de app nu de native Cloudflare EMAIL-binding. De afzender is `noreply@devstef.nl`, beperkt via de binding. De app heeft geen Resend-sleutel meer nodig. Providerfouten worden gesaneerd; quota blijven behouden bij onzekere uitkomsten. Root controleerde **8/8 auth-/accounttests**, Worker-TypeScript en diffcontrole. De oorspronkelijke Picnic-servicewijziging is ongewijzigd.
 
 Publieke DNS bevestigt `elias.ns.cloudflare.com` en `davina.ns.cloudflare.com` voor devstef.nl. De CLI-aanmelding is verlopen. Het dashboard bood het bestaande GitHub-profiel aan; hernieuwde toegang tot die GitHub-inlogstap is door automatische browserreview geweigerd. De gebruiker moet de login afronden. Domeinonboarding, verificatie van ontvangers en live-mailproef zijn nog niet uitgevoerd; geen betaald plan of DNS-wijziging is geactiveerd.
+
+### Cloudflare-accountcontrole — 8 oktober 2026
+
+Browserlogin werkt; devstef.nl staat in het juiste account. Email Routing-onboarding uitgevoerd met MX/SPF/DKIM, zonder bestaande MX te vervangen. Dashboard rapporteert nog Syncing en DNS Locked. Eigen Gmail-ontvanger is al Verified. Geen betaald plan geactiveerd, geen live e-mail verstuurd. Lokale Wrangler-login blijft verlopen; automatische goedkeuringscontrole blokkeerde de gevraagde workers:write-scope. Volgende stap: expliciete toestemming voor de lokale ontwikkelrechten, daarna echte verzendproef en bevestiging van domeinstatus.
+
+### Live Cloudflare-mailproef — 8 oktober 2026
+
+De eigenaar heeft lokale Workers-wijzigingsrechten goedgekeurd. Wrangler-login vernieuwd met account:read, user:read en workers_scripts:write. devstef.nl toont nu Routing Enabled en DNS Locked. Een eenmalige native EMAIL.send-test naar de bestaande geverifieerde eigenaar gaf messageId/accepted=true. Geen betaald plan of productiedeploy; tijdelijke testserver gestopt. Inboxontvangst en de volledige echte OTP-aanmeldflow blijven apart te bevestigen. De eerdere CLI-loginblokkade is opgelost.
+
+### Lokaal eigenaarsaccount gereed
+
+De eigenaar bevestigde ontvangst van de Cloudflare-testmail. Op diens verzoek is het lokale technische beheeraccount omgezet naar zijn geverifieerde Cloudflare-ontvanger; oude testsessies en testcodes zijn ingetrokken. De app vereist nog steeds een echte OTP om het e-mailadres te verifiëren. De dev-startopdracht gebruikt geen `--local` meer: die vlag schakelde ook de expliciete remote-mailbinding uit. Runtime bevestigd: alleen EMAIL remote; DB, R2 en queues lokaal. Backend op 8787 gereed. De gebruiker kan via http://localhost:5173 zelf een inlogcode aanvragen en invullen.
+
+### Picnic-stijl voor de webapp
+
+Officiële homepage en kookomgeving onderzocht; gemeten kleuren en Inter toegepast, bronnen in docs/design/PICNIC-REFERENCE.md. Nieuwe boven-/mobiele ondernavigatie, aparte Picnic-bestemming, nieuw inlogscherm, kookhero, receptkaarten, detail/editorhiërarchie en drie stappen voor productkeuze. Account, import, beheer en dialogen delen dezelfde vormgeving. TypeScript-appcheck, productiebuild en diffcheck geslaagd. Browsercontrole op 1280, 390 en 320 pixels; geen horizontale overflow in gecontroleerde schermen. Geen externe Picnic-toevoeging of mail verstuurd tijdens ontwerpcontrole. Bestaande lokale recepten en account behouden.
+
+## 2026-10-08 — URL-/fotoherkenning als verplichte start
+
+De correctie van de gebruiker is doorgevoerd: geen lege recepteditor of geplakte recepttekst als invoerroute. Recept toevoegen biedt een Culy-/MOB-link of maximaal drie JPG-/PNG-/WebP-foto’s. De browser zet foto’s zonder metadata om naar PNG; de server bewaart ze privé en controleert eigenaar, sessie, PNG-structuur en quota. Herkende gegevens worden vooraf ingevuld voor controle, inclusief exacte breuken en bronfoto’s. Ontbrekende herkenning leidt niet naar handmatig overtypen.
+
+AI-verwerking is teruggehaald uit de geparkeerde wijziging en uitgebreid met foto’s. Payloads bevatten uploadreferenties; beelddata wordt pas voor de provider vanuit privéopslag geladen. AI_QUEUE is aangesloten in alle omgevingen. Migratie 0011 is lokaal toegepast.
+
+Validatie: 23 testbestanden / 134 tests geslaagd; frontend- en worker-typecheck en productiebuild geslaagd. Browsercontrole bevestigt beide bronkeuzes. AI-tests gebruiken een nagebootste provider; er zijn geen echte betaalde herkenningsaanroepen gedaan. OPENAI_API_KEY en de gecontroleerde prijsconfiguratie ontbreken nog. De app is niet uitgerold; de pilot blijft geblokkeerd op echte herkenningskwaliteit en de overige punten in PILOT-RELEASE.md.
+
+Laatste integratiecorrectie: herkenning gebruikt de afzonderlijke AI_QUEUE; importberichten blijven op IMPORT_QUEUE. Na deze correctie zijn worker-typecheck en 26 gerichte import-/queue-/onderhoudstests geslaagd, inclusief de controle dat AI-berichten alleen op de AI-queue worden uitgevoerd.

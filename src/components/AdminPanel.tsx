@@ -15,6 +15,7 @@ export function AdminPanel({ me, onRefreshMe }: AdminPanelProps) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [reverify, setReverify] = useState(false);
+  const [catalogReport, setCatalogReport] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -61,6 +62,11 @@ export function AdminPanel({ me, onRefreshMe }: AdminPanelProps) {
       <h1>Beheer</h1>
       <p className="subtle">Nodig mensen uit en beheer toegang en stopinstellingen. Recepten van anderen zijn hier niet zichtbaar.</p>
     </div>
+    {import.meta.env.DEV && <section className="panel"><h2>Lokale catalogusproef</h2><p className="subtle">Lees drie eerder gevonden producten en één bestaande zoekvraag via je eigen Picnic-koppeling, plus de categorieroute: maximaal vijf aanvragen.</p><Button disabled={pending !== null} onClick={() => void run('catalog', async () => {
+      const response = await fetch('/api/catalog/diagnostics', {method: 'POST', credentials: 'include'});
+      if (!response.ok) { const result = await response.json(); throw new Error(`Catalogusproef: ${response.status} (${result.error?.code ?? 'onbekend'}).`); }
+      setCatalogReport(await response.json());
+    }, 'Leesproef voltooid.')}>{pending === 'catalog' ? 'Productdetails lezen…' : 'Controleer productdetails'}</Button>{catalogReport !== null && <pre style={{whiteSpace: 'pre-wrap', fontSize: '0.75rem'}}>{JSON.stringify(catalogReport, null, 2)}</pre>}</section>}
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="notice" role="status">{message}</p>}
     {!overview ? <div className="panel"><p>Beheer laden…</p><Button variant="outline" onClick={() => void load()}>Opnieuw laden</Button></div> : <>

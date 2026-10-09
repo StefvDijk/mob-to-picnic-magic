@@ -9,6 +9,7 @@ import { ImportPanel } from '@/components/ImportPanel';
 import { RecipeProducts } from '@/components/RecipeProducts';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { ArrowLeft, ArrowRight, BookOpenText, ChefHat, Plus, Search, Sparkles } from 'lucide-react';
 
 type IngredientDraft = {
   originalText: string; normalizedName: string; section: string; kind: Quantity['kind']; amount: string; maximum: string;
@@ -101,7 +102,10 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<View>('list');
+  const [view, setView] = useState<View>(() => sessionStorage.getItem(pendingImportKey) ? 'import' : 'list');
+  const [requestedServings, setRequestedServings] = useState('2');
+  const [requestedDeadlineAt,setRequestedDeadlineAt] = useState<number | undefined>();
+  const [requestedClientDeadlineAt,setRequestedClientDeadlineAt] = useState<number | undefined>();
   const [selected, setSelected] = useState<RecipeDto | null>(null);
   const [draft, setDraft] = useState<Draft>(freshDraft);
   const [editVersion, setEditVersion] = useState<number | null>(null);
@@ -129,10 +133,22 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    const id = sessionStorage.getItem(`picnic:active-shopping:${me.account.id}`);
+    if (!id) return;
+    let active = true;
+    void api.getRecipe(id).then(({ recipe }) => { if (active) { setSelected(recipe); setView('products'); } })
+      .catch(() => { if (active) sessionStorage.removeItem(`picnic:active-shopping:${me.account.id}`); });
+    return () => { active = false; };
+  }, [me.account.id]);
+  useEffect(() => {
+    if (view === 'products' && selected) sessionStorage.setItem(`picnic:active-shopping:${me.account.id}`, selected.id);
+  }, [view, selected, me.account.id]);
+
+  useEffect(() => {
     try {
       const saved = sessionStorage.getItem(draftKey);
       if (saved) { const parsed = JSON.parse(saved) as { draft?: Draft; recipeId?: string | null; version?: number | null };
-        if (parsed.draft) { setDraft(restoredDraft(parsed.draft)); setEditVersion(parsed.version ?? null); setView('edit'); setRestored(true);
+        if (parsed.draft && (parsed.draft.importSource || parsed.draft.title?.trim() || parsed.draft.ingredients?.some(item => item.originalText?.trim()) || parsed.draft.steps?.some(step => step.trim()))) { setDraft(restoredDraft(parsed.draft)); setEditVersion(parsed.version ?? null); setView('edit'); setRestored(true);
           if (parsed.recipeId) { setRestoreTargetId(parsed.recipeId); void api.getRecipe(parsed.recipeId).then(result => {
             setSelected(result.recipe); setRestoreTargetId(null);
             setDraft(current => ({ ...current, sourcePreview: previewFromRecipe(result.recipe) }));
@@ -188,32 +204,17 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
     }
     setConflict(false); setLatest(null); setImportSourceExpired(false); setError(''); setNotice(''); setView('edit');
   };
-  const useImportCandidate = (source: ImportDto, candidateIndex: number | null) => {
-    let preserved: { draft?: Draft; recipeId?: string | null; version?: number | null } | null = null;
-    try { const saved = sessionStorage.getItem(draftKey); if (saved) preserved = JSON.parse(saved); } catch { /* Ignore corrupt local draft. */ }
-    const sameImport = preserved?.draft?.importSource?.importId === source.id && preserved.draft.importSource.candidateIndex === candidateIndex;
-    if (preserved?.draft && !sameImport &&
-        !window.confirm('Je hebt nog een onafgemaakt concept. Als je deze import opent, wordt dat concept vervangen. Doorgaan?')) return;
-    const candidate = candidateIndex === null ? null : source.candidates[candidateIndex] ?? null;
+  const useImportCandidate = useCallback(async (source: ImportDto, candidateIndex: number, servings: string, baseServings?: string, clientDeadlineAt?: number) => {
+    const candidate = source.candidates[candidateIndex];
+    if (!candidate) return;
     const imported = recipeInputFromImport(source, candidate);
-    const sourcePreview: SourcePreview = { sourceKind: source.sourceKind, sourceText: source.sourceText, sourceUrl: source.sourceUrl, sourceLabel: source.sourceLabel, selectedCandidate: candidate };
-    if (sameImport && preserved?.draft) {
-      setSelected(null); setRestoreTargetId(null); setDraft({ ...restoredDraft(preserved.draft), sourcePreview,
-        importSource: { importId: source.id, candidateIndex, candidateCount: source.candidates.length } });
-      setEditVersion(null); setRestored(true); setConflict(false); setLatest(null); setImportSourceExpired(false); setError(''); setNotice(''); setView('edit');
-      setSourceFetchError('');
-      return;
-    }
-    const next: Draft = {
-      title: imported.title, sourceLabel: imported.sourceLabel ?? '', sourceUrl: imported.sourceUrl ?? '', baseServings: imported.baseServings ?? '',
-      steps: [...imported.steps], uploads: [...imported.uploads], sourcePreview,
-      importSource: { importId: source.id, candidateIndex, candidateCount: source.candidates.length },
-      ingredients: imported.ingredients.length ? imported.ingredients.map(item => ({ originalText: item.originalText, normalizedName: item.normalizedName ?? '', section: item.section ?? '',
-        kind: item.quantity.kind, amount: item.quantity.amount ?? '', maximum: item.quantity.maximum ?? '', unit: item.quantity.unit ?? 'g', basis: item.quantity.basis ?? '',
-        sourceOrigin: item.sourceOrigin, attributes: item.attributes, uncertainty: item.uncertainty })) : [{ ...EMPTY_INGREDIENT }],
-    };
-    setSelected(null); setRestoreTargetId(null); setDraft(next); setEditVersion(null); setRestored(false); setConflict(false); setLatest(null); setImportSourceExpired(false); setSourceFetchError(''); setError(''); setNotice(''); setView('edit');
-  };
+    const result = await api.createRecipe({ ...imported, baseServings: baseServings ?? imported.baseServings,
+      autoSave: true, importSource: { importId: source.id, candidateIndex } },clientDeadlineAt === undefined ? undefined : Math.max(1,clientDeadlineAt-Date.now()));
+    setRequestedDeadlineAt(source.deadlineAt ?? undefined); setRequestedClientDeadlineAt(clientDeadlineAt);
+    setSelected(result.recipe); setRequestedServings(servings); setView('products');
+    sessionStorage.removeItem(pendingImportKey);
+    await load();
+  }, [pendingImportKey, load]);
   const openRecipe = async (recipe: RecipeDto) => {
     setPending(true); setError('');
     try { const result = await api.getRecipe(recipe.id); setSelected(result.recipe); setView('detail'); }
@@ -312,12 +313,14 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
   </section>;
 
   if (view === 'products' && selected) return <section className="recipe-workspace">
-    <RecipeProducts key={selected.id} recipe={selected} onBack={() => setView('detail')} onEdit={() => edit(selected)} onAuthExpired={onAuthExpired} />
+    <RecipeProducts key={selected.id} recipe={selected} ownerId={me.account.id} initialServings={requestedServings} initialDeadlineAt={requestedDeadlineAt} clientDeadlineAt={requestedClientDeadlineAt} onBack={() => { sessionStorage.removeItem(`picnic:active-shopping:${me.account.id}`); setView('list'); }} onAuthExpired={onAuthExpired} />
   </section>;
 
-  return <section className="recipe-workspace" aria-labelledby="recipes-title">
-    <div className="recipe-heading"><div><p className="eyebrow">Jouw kookboek</p><h1 id="recipes-title">Mijn recepten</h1><p className="subtle">Bewaar je recepten en pas ze aan wanneer je wilt.</p></div>
-      <div className="recipe-heading-actions"><Button type="button" variant="outline" onClick={() => { setView('import'); setError(''); }}>Importeer recept</Button><Button type="button" onClick={() => edit(null)}>＋ Nieuw recept</Button></div></div>
+  return <section className="recipe-workspace" aria-labelledby={view === 'detail' ? 'recipe-detail-title' : view === 'edit' ? 'recipe-editor-title' : 'recipes-title'}>
+    {view === 'list' && <header className="recipe-heading recipe-page-heading">
+      <div className="recipe-heading-copy"><p className="eyebrow"><BookOpenText aria-hidden="true" /> Jouw kookboek</p><h1 id="recipes-title">Wat staat er op het menu?</h1><p className="subtle">Kies een recept of voeg een foto of link toe. Wij zoeken je Picnic-boodschappen.</p></div>
+      <div className="recipe-heading-actions"><Button type="button" onClick={() => { setView('import'); setError(''); }}><Plus aria-hidden="true" /> Nieuw recept naar mandje</Button></div>
+    </header>}
     {notice && <p className="recipe-notice" role="status">{notice}</p>}
     {restored && view === 'edit' && <p className="recipe-notice" role="status">Je onafgemaakte concept is teruggezet.</p>}
     {error && <p className="recipe-error" role="alert">{error}</p>}
@@ -333,21 +336,23 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
       </div>}
     </div>}
     {view === 'list' && <>
-      <div className="recipe-search"><label htmlFor="recipe-search">Zoek in geladen recepten</label><input id="recipe-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Titel, ingrediënt of bron" />{nextCursor && <small>Er zijn meer recepten. Laad ze hieronder om ook daarin te zoeken.</small>}</div>
-      {loading && recipes.length === 0 ? <p className="recipe-state" role="status">Recepten laden…</p> : error && recipes.length === 0 ? <div className="recipe-state"><p>Je recepten zijn niet geladen.</p><Button variant="outline" onClick={() => void load()}>Opnieuw proberen</Button></div> : visibleRecipes.length === 0 ? <div className="recipe-empty"><span aria-hidden="true">✳</span><h2>{query ? 'Geen recepten gevonden' : 'Je kookboek is nog leeg'}</h2><p>{query ? 'Probeer een andere zoekterm.' : 'Voeg je eerste recept toe om het hier te bewaren.'}</p>{!query && <div className="recipe-heading-actions"><Button variant="outline" onClick={() => setView('import')}>Importeer recept</Button><Button onClick={() => edit(null)}>Nieuw recept</Button></div>}</div> : <div className="recipe-list" aria-label="Recepten">
-        {visibleRecipes.map(recipe => <article className="recipe-list-card" key={recipe.id}><button className="recipe-open" type="button" onClick={() => void openRecipe(recipe)} disabled={pending}>
-          <span className="recipe-card-kicker">{recipe.sourceLabel || 'Eigen recept'}</span><strong>{recipe.title}</strong><span>{recipe.ingredients.length} {recipe.ingredients.length === 1 ? 'ingrediënt' : 'ingrediënten'}{recipe.baseServings ? ` · ${recipe.baseServings} porties` : ''}</span>
-        </button><Button variant="outline" disabled={pending} onClick={() => void openRecipeForEdit(recipe)}>Bewerk</Button></article>)}
+      <div className="recipe-list-toolbar"><label className="recipe-search" htmlFor="recipe-search"><Search aria-hidden="true" /><span className="sr-only">Zoek in geladen recepten</span><input id="recipe-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Zoek op recept, ingrediënt of bron" /></label><p className="recipe-list-count">{recipes.length} {recipes.length === 1 ? 'recept' : 'recepten'}{nextCursor ? ' in je kookboek' : ''}</p></div>
+      {loading && recipes.length === 0 ? <p className="recipe-state" role="status">Recepten laden…</p> : error && recipes.length === 0 ? <div className="recipe-state"><p>Je recepten zijn niet geladen.</p><Button variant="outline" onClick={() => void load()}>Opnieuw proberen</Button></div> : visibleRecipes.length === 0 ? <div className="recipe-empty"><div className="recipe-empty-illustration" aria-hidden="true"><BookOpenText /><Sparkles /></div><p className="eyebrow">{query ? 'Zoeken' : 'Begin je kookboek'}</p><h2>{query ? 'Geen recepten gevonden' : 'Er staat nog niets in je kookboek'}</h2><p>{query ? 'Probeer een andere zoekterm of ingrediënt.' : 'Voeg een recept toe via een link of foto. Wij halen de ingrediënten en stappen eruit.'}</p>{!query && <div className="recipe-heading-actions"><Button onClick={() => setView('import')}><Plus aria-hidden="true" /> Nieuw recept naar mandje</Button></div>}</div> : <div className="recipe-list" aria-label="Recepten">
+        {visibleRecipes.map((recipe, index) => <article className="recipe-list-card" key={recipe.id}>
+          <button className={`recipe-card-open recipe-card-tone-${index % 4}`} type="button" onClick={() => void openRecipe(recipe)} disabled={pending} aria-label={`Open recept: ${recipe.title}`}>
+            <span className="recipe-card-art" aria-hidden="true"><span>{String(index + 1).padStart(2, '0')}</span><ChefHat /></span>
+            <span className="recipe-card-content"><span className="recipe-card-kicker">{recipe.sourceLabel || 'Eigen recept'}</span><strong>{recipe.title}</strong><span className="recipe-card-meta"><span>{recipe.ingredients.length} {recipe.ingredients.length === 1 ? 'ingrediënt' : 'ingrediënten'}</span>{recipe.baseServings && <span>{recipe.baseServings} porties</span>}</span><span className="recipe-card-link">Bekijk recept <ArrowRight aria-hidden="true" /></span></span>
+          </button><Button className="recipe-card-edit" variant="outline" disabled={pending} onClick={() => void openRecipeForEdit(recipe)}>Bewerk</Button></article>)}
       </div>}
       {nextCursor && <div className="recipe-more"><Button variant="outline" disabled={loading} onClick={() => void load(nextCursor)}>{loading ? 'Laden…' : 'Meer recepten laden'}</Button></div>}
     </>}
     {view === 'detail' && selected && <article className="recipe-detail">
-      <div className="recipe-detail-top"><Button variant="ghost" onClick={() => { setView('list'); setSelected(null); }}>← Alle recepten</Button><div className="recipe-actions"><Button variant="outline" onClick={() => edit(selected)}>Bewerk recept</Button><Button variant="outline" onClick={() => setDeleteOpen(true)}>Verwijder</Button></div></div>
-      <p className="eyebrow">{selected.sourceLabel || 'Eigen recept'}</p><h2>{selected.title}</h2>
+      <div className="recipe-detail-top"><Button variant="ghost" onClick={() => { setView('list'); setSelected(null); }}><ArrowLeft aria-hidden="true" /> Alle recepten</Button><div className="recipe-actions"><Button variant="outline" onClick={() => edit(selected)}>Bewerk recept</Button><Button variant="outline" onClick={() => setDeleteOpen(true)}>Verwijder</Button></div></div>
+      <header className="recipe-detail-hero"><p className="eyebrow">{selected.sourceLabel || 'Uit jouw kookboek'}</p><h1 id="recipe-detail-title">{selected.title}</h1>
       {selected.sourceUrl && <p><a href={selected.sourceUrl} target="_blank" rel="noreferrer">Bekijk de bron ↗</a></p>}
-      <p className="recipe-meta">{selected.baseServings ? `${selected.baseServings} porties` : 'Porties niet opgegeven'} · versie {selected.version}</p>
-      <Button type="button" onClick={() => setView('products')}>Producten kiezen</Button>
-      {selected.uploads.length > 0 && <p className="recipe-meta">{selected.uploads.length} bronafbeelding(en) gekoppeld</p>}
+      <p className="recipe-meta"><span>{selected.baseServings ? `${selected.baseServings} porties` : 'Porties niet opgegeven'}</span><span>{selected.ingredients.length} ingrediënten</span><span>{selected.steps.length} stappen</span></p>
+      <Button type="button" onClick={() => { setRequestedDeadlineAt(undefined); setRequestedClientDeadlineAt(undefined); setRequestedServings(selected.baseServings ?? '2'); setView('products'); }}>Zoek mijn boodschappen <ArrowRight aria-hidden="true" /></Button></header>
+      {selected.uploads.length > 0 && <section><h3>Bronfoto’s</h3><div className="import-photo-previews">{selected.uploads.map(upload => <img key={upload.id} src={`/api/uploads/${encodeURIComponent(upload.id)}`} alt="Bronfoto van het recept" loading="lazy" />)}</div></section>}
       <div className="recipe-detail-columns"><section><h3>Ingrediënten</h3>{selected.ingredients.length ? <ul className="ingredient-list">{selected.ingredients.map(item => <li key={item.id}><span>{formatQuantity(item.quantity)}</span><strong>{item.originalText}</strong>{item.uncertainty.length > 0 && <small>{item.uncertainty.join(' · ')}</small>}</li>)}</ul> : <p className="subtle">Nog geen ingrediënten toegevoegd.</p>}</section>
         <section><h3>Bereiding</h3>{selected.steps.length ? <ol className="step-list">{selected.steps.map((step, index) => <li key={index}>{step}</li>)}</ol> : <p className="subtle">Nog geen bereidingsstappen toegevoegd.</p>}</section></div>
       {selected.sourceSnapshot && <section className="recipe-source-snapshot" aria-labelledby="saved-source-heading"><h3 id="saved-source-heading">Bewaarde bronkopie</h3>
@@ -357,10 +362,11 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
         <OriginalCandidate candidate={selected.sourceSnapshot.selectedCandidate} />
         <Button type="button" variant="outline" disabled={pending} onClick={() => setSourceDeleteOpen(true)}>Verwijder bewaarde bronkopie</Button>
       </section>}
-      <div className="recipe-integrations"><h3>Verder met dit recept</h3><p>Je kunt Picnic koppelen via Account. Vanuit je recepten kun je importeren en de herkende inhoud eerst controleren.</p></div>
+      <div className="recipe-integrations"><h3>Verder met dit recept</h3><p>Open Picnic in het menu om je account te koppelen. Met Kies producten stel je de boodschappen voor dit recept samen.</p></div>
     </article>}
     {view === 'edit' && <form className="recipe-editor" onSubmit={save}>
-      <div className="recipe-detail-top"><Button type="button" variant="ghost" onClick={() => setView(selected ? 'detail' : 'list')}>← Concept bewaren en terug</Button><p className="subtle">{selected ? 'Bewerk je recept' : draft.importSource ? 'Geïmporteerd concept' : 'Nieuw handmatig recept'}</p></div>
+      <div className="recipe-detail-top"><Button type="button" variant="ghost" onClick={() => setView(selected ? 'detail' : 'list')}><ArrowLeft aria-hidden="true" /> Terug</Button></div>
+      <header className="recipe-editor-intro"><p className="eyebrow">{selected ? 'Recept bewerken' : draft.importSource ? 'Importconcept' : 'Nieuw recept'}</p><h1 id="recipe-editor-title">{selected ? draft.title || 'Recept aanpassen' : draft.importSource ? draft.title || 'Controleer je import' : 'Jouw nieuwe recept'}</h1><p className="subtle">{selected ? 'Pas de details aan en bewaar je wijzigingen.' : 'Controleer de herkende gegevens. Je concept wordt tussendoor bewaard.'}</p></header>
       {(draft.sourcePreview || draft.importSource) && <section className="recipe-source-snapshot" aria-labelledby="draft-source-heading"><h2 id="draft-source-heading">Bron bij dit concept</h2>
         {draft.sourcePreview?.sourceLabel && <p>{draft.sourcePreview.sourceLabel}</p>}
         {draft.sourcePreview?.sourceText && <pre>{draft.sourcePreview.sourceText}</pre>}
@@ -388,7 +394,7 @@ export function RecipeWorkspace({ me, onAuthExpired }: { me: MeDto; onAuthExpire
         {draft.steps.length === 0 && <p className="subtle">Je kunt bereidingsstappen later toevoegen.</p>}
         {draft.steps.map((step, index) => <div className="step-editor" key={index}><label>Stap {index + 1}<textarea rows={4} value={step} onChange={event => setDraft(current => ({ ...current, steps: current.steps.map((value, i) => i === index ? event.target.value : value) }))} /></label><Button type="button" variant="ghost" onClick={() => setDraft(current => ({ ...current, steps: current.steps.filter((_, i) => i !== index) }))}>Verwijder stap {index + 1}</Button></div>)}
       </div>
-      {draft.uploads.length > 0 && <div className="editor-section"><h2>Bronafbeeldingen</h2><p>{draft.uploads.length} bronafbeelding(en) blijven aan dit recept gekoppeld. Afbeeldingen beheren volgt in een volgende bouwstap.</p></div>}
+      {draft.uploads.length > 0 && <div className="editor-section"><h2>Bronfoto’s</h2><div className="import-photo-previews">{draft.uploads.map(id => <img key={id} src={`/api/uploads/${encodeURIComponent(id)}`} alt="Bronfoto ter controle van het recept" loading="lazy" />)}</div></div>}
       <div className="editor-footer"><Button type="submit" disabled={pending}>{pending ? 'Opslaan…' : 'Recept opslaan'}</Button><p className="subtle">Je kunt het recept bewaren en later verder aanpassen.</p></div>
     </form>}
     <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Recept verwijderen?</AlertDialogTitle><AlertDialogDescription>“{selected?.title}” en de gekoppelde receptgegevens worden verwijderd. Dit kan niet ongedaan worden gemaakt.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={pending}>Annuleren</AlertDialogCancel><AlertDialogAction disabled={pending} onClick={event => { event.preventDefault(); void remove(); }}>{pending ? 'Verwijderen…' : 'Ja, verwijder recept'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>

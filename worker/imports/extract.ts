@@ -16,7 +16,7 @@ function clean(value: unknown, max = MAX_FIELD): string | null {
 }
 
 function entityDecode(text: string): string {
-  return text.replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<')
+  return text.replace(/&nbsp;/gi, ' ').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>').replace(/&amp;/gi, '&').replace(/&#(\d+);/g, (_m, n: string) => {
       const code = Number(n); return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
     }).replace(/&#x([\da-f]+);/gi, (_m, n: string) => {
@@ -122,7 +122,7 @@ function candidate(node: Record<string, unknown>, sourceUrl: string | null): Imp
   const servingsRaw = node.recipeYield;
   const yieldText = typeof servingsRaw === 'string' || typeof servingsRaw === 'number'
     ? String(servingsRaw).trim() : Array.isArray(servingsRaw) ? String(servingsRaw[0] ?? '').trim() : '';
-  const servingsMatch = yieldText.match(/^((?:0|[1-9]\d*)(?:\.\d+)?|(?:0|[1-9]\d*)\/(?:[1-9]\d*))(?:\s*(?:servings?|serves|people|persons?|personen|porties?|portions?))?$/i);
+  const servingsMatch = yieldText.match(/^(?:(?:voor|serves)\s+)?((?:0|[1-9]\d*)(?:\.\d+)?|(?:0|[1-9]\d*)\/(?:[1-9]\d*))(?:\s*(?:servings?|serves|people|persons?|personen|porties?|portions?))?$/i);
   const servings = servingsMatch ? parseRational(servingsMatch[1]) : null;
   const baseServings = servings && servings.numerator > 0 ? formatRational(servings) : null;
   const stepResult = instructions(node.recipeInstructions);

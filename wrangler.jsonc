@@ -5,11 +5,13 @@
   "compatibility_date": "2026-10-08",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": false },
-  "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY"] },
+  "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY", "OPENAI_API_KEY", "AI_PRICE_ATTESTATION", "AI_PRICE_VALID_UNTIL", "AI_EUR_PER_USD_BPS"] },
   "send_email": [{ "name": "EMAIL", "remote": true, "allowed_sender_addresses": ["noreply@devstef.nl"] }],
   "vars": {
     "EMAIL_FROM": "noreply@devstef.nl",
     "APP_ENV": "development",
+    "DECISIONS_MODE": "off",
+    "CATALOG_SYNC_ENABLED": "off",
     "PICNIC_ENCRYPTION_KEY_VERSION": "v1",
     "APP_ORIGIN": "http://localhost:5173"
   },
@@ -34,6 +36,7 @@
   "queues": {
     "producers": [
       { "binding": "IMPORT_QUEUE", "queue": "picnic-imports-local" },
+          { "binding": "AI_QUEUE", "queue": "picnic-ai-local" },
       { "binding": "ADD_QUEUE", "queue": "picnic-additions-local" }
     ],
     "consumers": [
@@ -44,7 +47,8 @@
         "max_batch_timeout": 5,
         "max_retries": 3
       },
-      {
+      { "queue": "picnic-ai-local", "dead_letter_queue": "picnic-ai-dead-local", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          {
         "queue": "picnic-additions-local",
         "dead_letter_queue": "picnic-additions-dead-local",
         "max_batch_size": 1,
@@ -64,6 +68,8 @@
       "vars": {
         "EMAIL_FROM": "noreply@devstef.nl",
         "APP_ENV": "test",
+        "DECISIONS_MODE": "off",
+        "CATALOG_SYNC_ENABLED": "off",
         "PICNIC_ENCRYPTION_KEY_VERSION": "v1",
         "APP_ORIGIN": "http://localhost:5173"
       },
@@ -76,21 +82,28 @@
       "queues": {
         "producers": [
           { "binding": "IMPORT_QUEUE", "queue": "picnic-imports-test" },
+          { "binding": "AI_QUEUE", "queue": "picnic-ai-test" },
           { "binding": "ADD_QUEUE", "queue": "picnic-additions-test" }
         ],
         "consumers": [
           { "queue": "picnic-imports-test", "dead_letter_queue": "picnic-imports-dead-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          { "queue": "picnic-ai-test", "dead_letter_queue": "picnic-ai-dead-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
           { "queue": "picnic-additions-test", "dead_letter_queue": "picnic-additions-dead-test", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
         ]
       }
     },
     "production": {
       "name": "picnic-production",
-      "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY"] },
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "picnic.devstef.nl", "custom_domain": true }],
+      "secrets": { "required": ["AUTH_SECRET", "OTP_HMAC_SECRET", "EMAIL_ADDRESS_HMAC_SECRET", "PICNIC_ENCRYPTION_KEY", "OPENAI_API_KEY", "AI_PRICE_ATTESTATION", "AI_PRICE_VALID_UNTIL", "AI_EUR_PER_USD_BPS"] },
       "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@devstef.nl"] }],
       "vars": {
         "EMAIL_FROM": "noreply@devstef.nl",
         "APP_ENV": "production",
+        "DECISIONS_MODE": "off",
+        "CATALOG_SYNC_ENABLED": "off",
         "PICNIC_ENCRYPTION_KEY_VERSION": "v1",
         "APP_ORIGIN": "https://picnic.devstef.nl"
       },
@@ -98,20 +111,22 @@
         {
           "binding": "DB",
           "database_name": "picnic-production",
-          // Replace this sentinel only after manually provisioning the production database in the EU.
-          "database_id": "REPLACE_WITH_PROVISIONED_D1_ID"
+          // Separate EU production database, provisioned 9 October 2026.
+          "database_id": "85c947b8-ea1c-42c3-a3a8-c95ffe002c58"
         }
       ],
       "r2_buckets": [
-        { "binding": "UPLOADS", "bucket_name": "picnic-uploads-production" }
+        { "binding": "UPLOADS", "bucket_name": "picnic-uploads-production", "jurisdiction": "eu" }
       ],
       "queues": {
         "producers": [
           { "binding": "IMPORT_QUEUE", "queue": "picnic-imports-production" },
+          { "binding": "AI_QUEUE", "queue": "picnic-ai-production" },
           { "binding": "ADD_QUEUE", "queue": "picnic-additions-production" }
         ],
         "consumers": [
           { "queue": "picnic-imports-production", "dead_letter_queue": "picnic-imports-dead-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
+          { "queue": "picnic-ai-production", "dead_letter_queue": "picnic-ai-dead-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 },
           { "queue": "picnic-additions-production", "dead_letter_queue": "picnic-additions-dead-production", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3 }
         ]
       }

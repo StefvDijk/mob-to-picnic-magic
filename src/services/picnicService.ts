@@ -1,5 +1,45 @@
 import PicnicClient from 'picnic-api';
 
+const DEFAULT_DEV_API_PORT = 3000;
+
+const isAbsoluteUrl = (url: string): boolean => /^https?:\/\//i.test(url);
+
+const normalizeBaseUrl = (baseUrl: string): string => baseUrl.replace(/\/+$/, '');
+
+const normalizePath = (path: string): string => {
+  if (!path) {
+    return '';
+  }
+
+  return path.startsWith('/') ? path : `/${path}`;
+};
+
+const resolveDevBaseUrl = (): string => {
+  if (typeof window === 'undefined') {
+    return `http://localhost:${DEFAULT_DEV_API_PORT}`;
+  }
+
+  const hostname = window.location?.hostname || 'localhost';
+  return `http://${hostname}:${DEFAULT_DEV_API_PORT}`;
+};
+
+export const buildUrl = (path: string): string => {
+  if (isAbsoluteUrl(path)) {
+    return path;
+  }
+
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL;
+  if (configuredBaseUrl) {
+    return `${normalizeBaseUrl(configuredBaseUrl)}${normalizePath(path)}`;
+  }
+
+  if (import.meta.env.DEV) {
+    return `${normalizeBaseUrl(resolveDevBaseUrl())}${normalizePath(path)}`;
+  }
+
+  return path;
+};
+
 export interface PicnicCredentials {
   username: string;
   password: string;

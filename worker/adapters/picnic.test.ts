@@ -26,6 +26,22 @@ function clientFixture(overrides: Partial<PicnicClientLike> = {}): PicnicClientL
 }
 
 describe('Picnic 4.10 provider boundary', () => {
+  it('aborts real read transports at the shared deadline and starts no read after abort', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(new Error('aborted')), {once: true});
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const provider = createAbortablePicnicProvider({signal: controller.signal});
+      const search = provider.search('fixture', 'uien');
+      const failed = expect(search).rejects.toBeInstanceOf(PicnicTimeoutError);
+      controller.abort();
+      await failed;
+      await expect(provider.productDetails!('fixture', 'sku')).rejects.toBeInstanceOf(PicnicTimeoutError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('uses the proven endpoints and request shapes with an abort signal', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
@@ -96,6 +112,16 @@ describe('Picnic 4.10 provider boundary', () => {
     expect(products[0]?.identity).toEqual({ groupId: 'sku-1', variantId: 'sku-1' });
   });
 
+  it.each([[1, 80], [2, 89], [null, 89]])('attributes a discounted line price only to one known pack (quantity %s)', async (quantity, expectedPrice) => {
+    const api = createPicnicProvider(() => clientFixture({ cart: { getCart: vi.fn(async () => ({
+      type: 'ORDER', items: [{ type: 'ORDER_LINE', display_price: 89, price: 89,
+        decorators: [{ type: 'PRICE', display_price: 80 }],
+        items: [{ id: 'onion', name: 'Gele uien', unit_quantity: '3 stuks', price: 89 }],
+    }], analytics_context_data: { items_list: [{ product_id: 'onion', quantity, is_available: false }] },
+    } as never)) } }));
+    expect((await api.cart('fixture-key'))[0].unitPriceCents).toBe(expectedPrice);
+  });
+
   it('whitelists cart lines and preserves unknown analytics quantity and availability safely', async () => {
     const api = createPicnicProvider(() => clientFixture());
     expect(await api.cart('auth')).toEqual([
@@ -103,4 +129,41 @@ describe('Picnic 4.10 provider boundary', () => {
       { productId: 'sku-2', name: 'Unknown count', unitQuantity: 'unknown', quantity: 1, unitPriceCents: 99, isAvailable: false },
     ]);
   });
+});
+
+describe('real catalogue regressions', () => {
+  it('accepts Dutch packaging and complete tier schedules', () => {
+    const value = normalizeProduct({ id: 's1', name: 'Picnic kappertjes', image_id: '', unit_quantity: '90 gram', display_price: 49,
+      max_count: 20, decorators: [], price_ranges: [{ from_quantity: 1, price: 49 }, { from_quantity: 2, price: 45 }] });
+    expect(value).toMatchObject({ quantity: { amount: '90', unit: 'g' }, priceCertainty: 'known' });
+  });
+  it('extracts products from large page trees without counting every scalar as a component', async () => {
+    const content = Array.from({ length: 20000 }, () => ({ text: 'a', style: 'b', action: 'c', type: 'd' }));
+    const fetchMock = vi.fn(async () => Response.json({ content: [...content, { sellingUnit: { id: 's1', name: 'Rijst', unit_quantity: '1 kilogram', display_price: 199 } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    try { expect(await createAbortablePicnicProvider().search('test', 'rijst')).toMatchObject([{ quantity: { amount: '1', unit: 'kg' } }]); }
+    finally { vi.unstubAllGlobals(); }
+  });
+});
+
+it('keeps searches bounded while accepting a real-sized catalogue page over 2 MB', async () => {
+  const product = { id: 's1', name: 'Tomaten', unit_quantity: '1 kilo', display_price: 199, max_count: 0 };
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ text: 'x'.repeat(2_100_000), content: [{ sellingUnit: product }] })));
+  try { expect(await createAbortablePicnicProvider().search('fixture', 'tomaten')).toMatchObject([{ quantity: { unit: 'kg' }, maxCount: 0 }]); }
+  finally { vi.unstubAllGlobals(); }
+});
+
+it('observes search availability fields without deriving stock from UI or exposing raw analytics', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ analytics: { customer_email: 'private@example.invalid' },
+    content: [{ type: 'UNAVAILABILITY_CONTAINER', sellingUnitId: 'sku-1' }, { sellingUnit: {
+      id: 'sku-1', name: 'Gele uien', unit_quantity: '3 stuks', display_price: 80, max_count: 50,
+      decorators: [{ type: 'UNAVAILABLE', reason: 'CLOSED' }],
+    } }] })));
+  try {
+    const result = await createAbortablePicnicProvider().searchDiagnostics!('fixture', 'gele uien', 'sku-1');
+    expect(result.products[0].isAvailable).toBe(false);
+    expect(result.diagnostic.availabilitySignals).toContainEqual(expect.objectContaining({ type: 'unavailable_decorator', value: false }));
+    expect(result.diagnostic.availabilitySignals).toContainEqual(expect.objectContaining({ type: 'UNAVAILABILITY_CONTAINER' }));
+    expect(JSON.stringify(result)).not.toContain('private@example.invalid');
+  } finally { vi.unstubAllGlobals(); }
 });

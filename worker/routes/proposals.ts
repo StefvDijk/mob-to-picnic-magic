@@ -53,7 +53,7 @@ function ingredientQuantity(row: IngredientRow): Quantity | null {
   try { const parsed: unknown = JSON.parse(row.attributesJson); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) attributes = parsed as Record<string, unknown>; }
   catch { return null; }
   const basis = attributes.quantityBasis === 'net' || attributes.quantityBasis === 'drained' ? attributes.quantityBasis : null;
-  const raw: Quantity = row.quantityKind === 'global' || row.quantityKind === 'unknown' ? { kind: row.quantityKind, basis }
+  const raw: Quantity = row.quantityKind === 'global' || row.quantityKind === 'unknown' ? { kind: row.quantityKind, basis: null }
     : { kind: row.quantityKind, amount: formatRational({ numerator: row.quantityNum ?? 0, denominator: row.quantityDen }),
       ...(row.quantityKind === 'range' ? { maximum: formatRational({ numerator: row.quantityMaxNum ?? 0, denominator: row.quantityDen }) } : {}),
       unit: row.unit ?? undefined, basis };
@@ -269,6 +269,8 @@ async function loadProposal(env: ProposalEnv, principal: Principal, id: string):
   const needs: ProposalNeedDto[] = [];
   let totalPriceCents = 0;
   for (const row of lines.results) {
+    const grouped = needs.find(need => need.id === String(row.id));
+    if (grouped) { grouped.ingredientIds = [...(grouped.ingredientIds ?? [grouped.ingredientId]), String(row.ingredientId)]; continue; }
     const ingredient = row as unknown as IngredientRow;
     const quantity = ingredientQuantity(ingredient);
     if (!quantity || !row.productSnapshot || typeof row.productSnapshot !== 'string') return null;
@@ -277,9 +279,9 @@ async function loadProposal(env: ProposalEnv, principal: Principal, id: string):
     if (!product || typeof product.priceCents !== 'number' || typeof product.packCount !== 'number') return null;
     totalPriceCents += product.priceCents * product.packCount;
     const needed = parseRational(quantity.kind === 'range' ? quantity.maximum : quantity.amount);
-    if (!needed) return null;
+    if (!needed && quantity.kind !== 'unknown' && quantity.kind !== 'global') return null;
     needs.push({ id: String(row.id), ingredientId: String(row.ingredientId), ordinal: Number(row.ordinal),
-      name: String(row.normalizedName ?? row.originalText), quantity, needed: formatRational(needed), product });
+      name: String(row.normalizedName ?? row.originalText), quantity, needed: needed ? formatRational(needed) : null, product });
   }
   if (!needs.length || !Number.isSafeInteger(totalPriceCents)) return null;
   return { id: proposal.id, recipeId: proposal.recipeId, recipeVersion: proposal.recipeVersion, version: proposal.version,

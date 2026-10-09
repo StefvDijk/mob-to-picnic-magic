@@ -1,3 +1,4 @@
+import type { ShoppingPlan, ShoppingProposalInput, ShoppingProposalResult } from '../../shared/shopping';
 import type { RecipeDto, RecipeIngredientDto, RecipeImportSourceInput } from '../../shared/recipes';
 import type { PicnicCart, PicnicConnectResponse, PicnicConnectionDto, PicnicProduct } from '../../shared/picnic';
 import type { ImportDto } from '../../shared/imports';
@@ -29,6 +30,7 @@ export interface RecipeInputDto {
   ingredients: Omit<RecipeIngredientDto, 'id' | 'ordinal'>[];
   uploads: string[];
   importSource?: RecipeImportSourceInput;
+  autoSave?: boolean;
 }
 
 export interface AdminOverviewDto {
@@ -48,17 +50,19 @@ export class ApiError extends Error {
 
 interface ErrorBody { error?: { code?: string; message?: string; fields?: Record<string, string> } }
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs?: number): Promise<T> {
   let response: Response;
+  const signal = timeoutMs === undefined ? undefined : AbortSignal.timeout(Math.max(1,Math.ceil(timeoutMs)));
   try {
     response = await fetch(path, {
-      method,
+      method, signal,
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined ? undefined : { 'Content-Type': body instanceof Blob ? body.type : 'application/json' },
+      body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
     });
   } catch {
+    if (signal?.aborted) throw new ApiError(504,'WORKFLOW_TIMEOUT','Dit duurde langer dan 30 seconden. Je resultaat kan al bewaard zijn; controleer het bestaande resultaat.');
     throw new ApiError(0, 'NETWORK_ERROR', 'Verbinding mislukt. Controleer je internetverbinding en probeer het opnieuw.');
   }
   if (!response.ok) {
@@ -73,6 +77,8 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 export const api = {
+  shoppingPlan: (recipeId: string, servings: string, refresh = false, deadlineAt?: number, timeoutMs?: number) => request<{ plan: ShoppingPlan }>('/api/shopping/plan', 'POST', { recipeId, servings, refresh, ...(deadlineAt === undefined ? {} : {deadlineAt}) }, timeoutMs),
+  prepareShopping: (input: ShoppingProposalInput) => request<ShoppingProposalResult>('/api/shopping/proposals', 'POST', input),
   approveProposal: (id: string, expectedVersion: number) => request<{ action: ActionDto }>(`/api/proposals/${encodeURIComponent(id)}/approve`, 'POST', { expectedVersion }),
   getAction: (id: string) => request<{ action: ActionDto }>(`/api/actions/${encodeURIComponent(id)}`),
   getProposalAction: (id: string) => request<{ action: ActionDto }>(`/api/proposals/${encodeURIComponent(id)}/action`),
@@ -87,7 +93,7 @@ export const api = {
   deleteAccount: () => request<{ deletion: { id: string; status: string } }>('/api/account', 'DELETE', { confirm: 'VERWIJDER ACCOUNT' }),
   listRecipes: (cursor?: string) => request<{ recipes: RecipeDto[]; nextCursor: string | null }>(`/api/recipes${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`),
   getRecipe: (id: string) => request<{ recipe: RecipeDto }>(`/api/recipes/${encodeURIComponent(id)}`),
-  createRecipe: (input: RecipeInputDto) => request<{ recipe: RecipeDto }>('/api/recipes', 'POST', input),
+  createRecipe: (input: RecipeInputDto, timeoutMs?: number) => request<{ recipe: RecipeDto }>('/api/recipes', 'POST', input, timeoutMs),
   updateRecipe: (id: string, expectedVersion: number, input: RecipeInputDto) => request<{ recipe: RecipeDto }>(`/api/recipes/${encodeURIComponent(id)}`, 'PUT', { ...input, expectedVersion }),
   deleteRecipe: (id: string) => request<void>(`/api/recipes/${encodeURIComponent(id)}`, 'DELETE'),
   deleteRecipeSource: (id: string) => request<void>(`/api/recipes/${encodeURIComponent(id)}/source`, 'DELETE'),
@@ -101,7 +107,8 @@ export const api = {
   disconnectPicnic: () => request<void>('/api/picnic/connection', 'DELETE'),
   searchPicnicProducts: (query: string) => request<{ products: PicnicProduct[] }>(`/api/picnic/products?q=${encodeURIComponent(query)}`),
   picnicCart: () => request<{ cart: PicnicCart }>('/api/picnic/cart'),
-  importText: (text: string) => request<{ import: ImportDto }>('/api/imports', 'POST', { type: 'text', text }),
-  importUrl: (url: string, sourceLabel?: string) => request<{ import: ImportDto }>('/api/imports', 'POST', { type: 'url', url, ...(sourceLabel ? { sourceLabel } : {}) }),
-  getImport: (id: string) => request<{ import: ImportDto }>(`/api/imports/${encodeURIComponent(id)}`),
+  uploadPhoto: (photo: Blob, timeoutMs?: number) => request<{ upload: { id: string } }>('/api/uploads', 'POST', photo, timeoutMs),
+  importPhotos: (uploadIds: string[], remainingMs?: number) => request<{ import: ImportDto }>('/api/imports', 'POST', { type: 'upload', uploadIds, remainingMs }, remainingMs),
+  importUrl: (url: string, sourceLabel?: string, remainingMs?: number) => request<{ import: ImportDto }>('/api/imports', 'POST', { type: 'url', url, remainingMs, ...(sourceLabel ? { sourceLabel } : {}) }, remainingMs),
+  getImport: (id: string, timeoutMs?: number) => request<{ import: ImportDto }>(`/api/imports/${encodeURIComponent(id)}`,'GET',undefined,timeoutMs),
 };

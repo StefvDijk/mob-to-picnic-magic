@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpenText, Settings2, UserRound } from 'lucide-react';
+import { BookOpenText, Settings2, UserRound, ShoppingBasket, ChefHat, ArrowRight, Check } from 'lucide-react';
 import { api, ApiError, type MeDto } from '@/lib/api';
 import { AuthPanel } from '@/components/AuthPanel';
 import { AccountPanel } from '@/components/AccountPanel';
 import { AdminPanel } from '@/components/AdminPanel';
+import { PicnicPanel } from '@/components/PicnicPanel';
 import { RecipeWorkspace } from '@/components/RecipeWorkspace';
 
-type Section = 'recipes' | 'account' | 'admin';
+type Section = 'recipes' | 'picnic' | 'account' | 'admin';
 
 function clearOwnerDrafts(ownerId: string) {
   sessionStorage.removeItem(`picnic:recipe-draft:${ownerId}`);
@@ -58,24 +59,28 @@ export default function Index() {
 
   if (error && !me && !lastOwner.current) return <main className="auth-layout"><div className="auth-card" role="alert"><h1>Verbinding mislukt</h1><p>{error}</p><button className="text-button" onClick={() => void refreshMe()}>Opnieuw proberen</button></div></main>;
 
-  if (!me) return <main className="auth-layout">{error && <p className="notice" role="status">{error}</p>}<AuthPanel onAuthenticated={refreshMe} /></main>;
+  if (!me) return <main className="welcome-layout">
+      <section className="welcome-story"><div className="brand"><span className="brand-mark"><ChefHat aria-hidden="true" /></span>Mijn recepten</div><div><p className="eyebrow">Van kookidee naar boodschappen</p><h1>Wat eten<br />we vandaag?</h1><p>Al je favoriete recepten op één plek. Kies je porties, bekijk je boodschappen en zet ze klaar in Picnic.</p><ol className="welcome-steps"><li><BookOpenText aria-hidden="true" />Bewaar je favoriete recepten</li><li><Check aria-hidden="true" />Kies wat bij jou past</li><li><ShoppingBasket aria-hidden="true" />Vul je Picnic-mandje</li></ol></div><p className="welcome-note">Jouw receptenapp, gekoppeld aan Picnic.</p></section>
+      <div className="welcome-login">{error && <p className="notice" role="status">{error}</p>}<AuthPanel onAuthenticated={refreshMe} /></div></main>;
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Ga naar inhoud</a>
-    <header className="site-header">
-      <div className="site-header-inner"><div className="brand"><span className="brand-mark" aria-hidden="true">●</span><span>Mijn recepten</span></div>
-        <span className="pilot-pill">{me.environment === 'production' ? 'Pilot' : me.environment === 'test' ? 'Testomgeving' : 'Ontwikkeling'}</span></div>
-    </header>
-    <div className="app-grid">
+    <header className="site-header"><div className="site-header-inner">
+      <button className="brand" type="button" onClick={() => setSection('recipes')} aria-label="Naar mijn recepten"><span className="brand-mark"><ChefHat aria-hidden="true" /></span><span>Mijn recepten</span></button>
       <nav className="app-nav" aria-label="Hoofdnavigatie">
-        <button type="button" aria-current={section === 'recipes' ? 'page' : undefined} onClick={() => setSection('recipes')}><BookOpenText aria-hidden="true" />Mijn recepten</button>
+        <button type="button" aria-current={section === 'recipes' ? 'page' : undefined} onClick={() => setSection('recipes')}><BookOpenText aria-hidden="true" />Recepten</button>
+        <button type="button" aria-current={section === 'picnic' ? 'page' : undefined} onClick={() => setSection('picnic')}><ShoppingBasket aria-hidden="true" />Picnic</button>
         <button type="button" aria-current={section === 'account' ? 'page' : undefined} onClick={() => setSection('account')}><UserRound aria-hidden="true" />Account</button>
         {me.account.role === 'admin' && <button type="button" aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}><Settings2 aria-hidden="true" />Beheer</button>}
       </nav>
+      <button className="connection-chip" onClick={() => setSection('picnic')}><span className={me.picnic.status === 'connected' ? 'status-dot connected' : 'status-dot'} />{me.picnic.status === 'connected' ? 'Picnic verbonden' : 'Koppel Picnic'}<ArrowRight size={15} aria-hidden="true" /></button>
+    </div></header>
+    <div className="app-grid">
       <main id="main-content" className="main-content" tabIndex={-1}>
         {error && <p className="error-message" role="alert">{error}</p>}
         {section === 'recipes' && <RecipeWorkspace key={me.account.id} me={me} onAuthExpired={() => { setMe(null); setError('Je sessie is verlopen. Log opnieuw in om verder te gaan. Je concept blijft op dit apparaat bewaard.'); }} />}
-        {section === 'account' && <AccountPanel me={me} onRefresh={refreshMe} onSignedOut={signedOut} />}
+        {section === 'picnic' && <div className="view-stack"><header className="page-heading"><p className="eyebrow">Van recept naar mandje</p><h1>Jouw Picnic</h1><p className="subtle">Verbind je account, zoek producten en bekijk wat er in je mandje zit.</p></header><PicnicPanel me={me} onRefresh={refreshMe} /><p className="app-footnote">Mijn recepten is een onafhankelijke testapp. Bestellen en afrekenen doe je in de Picnic-app.</p></div>}
+        {section === 'account'  && <AccountPanel me={me} onRefresh={refreshMe} onSignedOut={signedOut} />}
         {section === 'admin' && me.account.role === 'admin' && <AdminPanel me={me} onRefreshMe={refreshMe} />}
       </main>
     </div>

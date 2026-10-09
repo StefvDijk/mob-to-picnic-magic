@@ -1,12 +1,14 @@
 import { env } from 'cloudflare:workers';
 import { applyD1Migrations } from 'cloudflare:test';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapAdmin, claimAction, consumeInvitation, createApprovedAction, createInvitation, createInvitedAccount, createSessionMetadata, markExecutionSending } from '../db';
 import { addPicnicProduct, PicnicTransportUncertainError } from '../adapters/picnic';
 import { encryptCredential } from '../security/credentials';
 import type { AuthEnv } from '../auth';
 import { dispatchAdditionOutbox } from './outbox';
 import { processAdditionTask } from './processor';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const db = env.DB;
 const key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
@@ -179,4 +181,23 @@ describe('addition outbox', () => {
     expect(await dispatchAdditionOutbox(outboxEnv, test.now + 61_001)).toBe(1);
     expect(send).toHaveBeenCalledTimes(2);
   });
+});
+
+
+it('keeps the real transport unknown for an exact cart snapshot and never resends after redelivery', async () => {
+  const test = await fixture(2);
+  const fetcher = vi.fn(async () => Response.json({
+    type: 'ORDER', id: 'shopping_cart', mts: test.now,
+    items: [{ type: 'ORDER_LINE', id: 'line', items: [{ type: 'ORDER_ARTICLE', id: 'sku-0', name: 'Fixture product', unit_quantity: '1 piece', price: 100 }] }],
+    analytics_context_data: { items_list: [{ product_id: 'sku-0', quantity: 1, is_available: true }] },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  await processAdditionTask(testEnv, test.actionId, 1);
+  await processAdditionTask(testEnv, test.actionId, 1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const [, request] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(request.body))).toEqual({ product_id: 'sku-0', count: 1 });
+  expect(await db.prepare(`SELECT state FROM actions WHERE id=?`).bind(test.actionId).first()).toEqual({ state: 'unknown' });
+  expect(await db.prepare(`SELECT status FROM execution_lines WHERE action_id=? ORDER BY ordinal`).bind(test.actionId).all())
+    .toMatchObject({ results: [{ status: 'unknown' }, { status: 'skipped' }] });
 });

@@ -9,9 +9,9 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "dev:worker": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --local --port 8787",
+    "dev:worker": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --port 8787",
     "dev:worker:test": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --env test --local --port 8787",
-    "dev:scheduled": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --local --test-scheduled --port 8787",
+    "dev:scheduled": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --test-scheduled --port 8787",
     "typecheck:worker": "tsc --noEmit -p tsconfig.worker.json",
     "test:worker": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false vitest run --config vitest.config.ts",
     "types:worker": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler types worker/runtime.d.ts"

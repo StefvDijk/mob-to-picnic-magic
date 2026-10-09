@@ -1,262 +1,218 @@
+import { restoreShoppingChoice, type ShoppingChoiceState as Choice } from '@/lib/shopping-choice';
+import { unitPriceForPacks } from '../../shared/product-pricing';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PicnicProduct } from '../../shared/picnic';
-import type { ProposalDto } from '../../shared/proposals';
-import type { RecipeDto, RecipeIngredientDto } from '../../shared/recipes';
-import { formatRational, parseRational } from '../../shared/quantities';
+import type { RecipeDto } from '../../shared/recipes';
+import type { ShoppingCandidate, ShoppingPlan, ShoppingProposalInput, ShoppingProposalResult, ShoppingRow } from '../../shared/shopping';
+import { validServings } from '../../worker/domain/shopping';
 import { api, ApiError } from '@/lib/api';
-import { planIngredientProducts } from '@/lib/product-plan';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AdditionStatus } from '@/components/AdditionStatus';
+import { ArrowLeft, ChevronDown, LoaderCircle, ShoppingBasket } from 'lucide-react';
 
-function euro(cents: number): string {
-  return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(cents / 100);
-}
-function packageText(product: PicnicProduct): string {
-  const quantity = product.quantity;
-  if (!quantity || quantity.kind === 'unknown' || quantity.kind === 'global') return product.unitQuantity || 'Hoeveelheid onbekend';
-  const amount = quantity.kind === 'range' ? `${quantity.amount}–${quantity.maximum}` : quantity.amount;
-  const basis = quantity.basis === 'net' ? ' netto' : quantity.basis === 'drained' ? ' uitgelekt' : '';
-  return `${amount} ${quantity.unit ?? ''}${basis}`.trim();
-}
-function unitPriceText(product: PicnicProduct): string | null {
-  const quantity = product.quantity;
-  const amount = quantity?.kind === 'exact' ? parseRational(quantity.amount) : null;
-  if (!amount || amount.numerator <= 0 || product.displayPriceCents === null || !quantity?.unit) return null;
-  const factor = quantity.unit === 'g' || quantity.unit === 'ml' ? 1000 : 1;
-  const perBaseUnitCents = product.displayPriceCents * factor * amount.denominator / amount.numerator;
-  const unit = quantity.unit === 'g' || quantity.unit === 'kg' ? 'kg' : quantity.unit === 'ml' || quantity.unit === 'l' ? 'l' : 'stuk';
-  return `${new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(perBaseUnitCents / 100)}/${unit}`;
-}
-function candidateProblem(product: PicnicProduct, ingredient: RecipeIngredientDto): string | null {
-  const need = ingredient.quantity;
-  if (product.priceCertainty !== 'known' || product.displayPriceCents === null) return 'Prijs is onzeker of onbekend';
-  if (product.quantity?.kind !== 'exact' || !product.quantity.unit) return 'Verpakkingshoeveelheid is onbekend of niet exact';
-  const unit = product.quantity.unit;
-  const compatible = (need.unit === 'g' || need.unit === 'kg') && (unit === 'g' || unit === 'kg') ||
-    (need.unit === 'ml' || need.unit === 'l') && (unit === 'ml' || unit === 'l') || need.unit === 'piece' && unit === 'piece';
-  if (!compatible) return 'Eenheid past niet bij de recepthoeveelheid';
-  if (need.unit !== 'piece' && !need.basis) return 'Kies eerst netto of uitgelekt in het recept';
-  if (product.quantity.basis && need.basis && product.quantity.basis !== need.basis) return 'Basis verschilt van het recept';
-  return null;
-}
+type PendingPurchase = { input: ShoppingProposalInput; result?: ShoppingProposalResult; actionId?: string };
+const euro = (cents: number) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+function readSaved<T>(key: string): T | null { try { return JSON.parse(localStorage.getItem(key) ?? 'null') as T | null; } catch { return null; } }
+const validCount = (count: number | null | undefined): count is number => Number.isSafeInteger(count) && count! >= 1 && count! <= 10_000;
+const sourceText = (row: ShoppingRow) => [...new Set(row.sources.map(source => source.originalText))].join(' + ');
 
-export function RecipeProducts({ recipe, onBack, onEdit, onAuthExpired }: {
-  recipe: RecipeDto;
-  onBack: () => void;
-  onEdit: () => void;
-  onAuthExpired: () => void;
+export function RecipeProducts({ recipe: originalRecipe, ownerId, initialServings, initialDeadlineAt, clientDeadlineAt, onBack, onAuthExpired }: {
+  recipe: RecipeDto; ownerId: string; initialServings: string; initialDeadlineAt?: number; clientDeadlineAt?: number; onBack: () => void; onAuthExpired: () => void;
 }) {
-  const [servings, setServings] = useState(recipe.baseServings ?? '2');
-  const [queries, setQueries] = useState<Record<string, string>>({});
-  const [results, setResults] = useState<Record<string, PicnicProduct[]>>({});
-  const [loading, setLoading] = useState<Set<string>>(() => new Set());
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [suitable, setSuitable] = useState<Set<string>>(() => new Set());
-  const [basisConfirmed, setBasisConfirmed] = useState<Set<string>>(() => new Set());
-  const [searchedQueries, setSearchedQueries] = useState<Record<string, string>>({});
-  const [proposal, setProposal] = useState<ProposalDto | null>(null);
-  const [proposalPending, setProposalPending] = useState(false);
-  const [proposalError, setProposalError] = useState('');
-  const [actionId, setActionId] = useState<string | null>(null);
-  const [approving, setApproving] = useState(false);
-  const [recovering, setRecovering] = useState(true);
-  const [approvalStarted, setApprovalStarted] = useState(() => !!sessionStorage.getItem(`picnic:approved-proposal:${recipe.id}`));
-  const recoveryKey = `picnic:approved-proposal:${recipe.id}`;
+  const key = `picnic:shopping:${ownerId}:${originalRecipe.id}`;
+  const [recipe, setRecipe] = useState(originalRecipe);
+  const [servings, setServings] = useState(() => readSaved<{ servings: string }>(key)?.servings ?? initialServings);
+  const [baseServings, setBaseServings] = useState('');
+  const [plan, setPlan] = useState<ShoppingPlan | null>(null);
+  const [choices, setChoices] = useState<Record<string, Choice>>({});
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  const [purchase, setPurchase] = useState<PendingPurchase | null>(() => readSaved<PendingPurchase>(`${key}:purchase`));
+  const working = useRef(false);
+  const [recovering, setRecovering] = useState(!!purchase);
+  const requestCache = useRef<{ key: string; promise: ReturnType<typeof api.shoppingPlan> } | null>(null);
+
+  const persistPurchase = (next: PendingPurchase) => { localStorage.setItem(`${key}:purchase`, JSON.stringify(next)); setPurchase(next); };
   useEffect(() => {
     let cancelled = false;
-    const saved = sessionStorage.getItem(recoveryKey);
-    if (!saved) { setRecovering(false); return; }
-    void api.getProposalAction(saved).then(result => {
-      if (!cancelled) setActionId(result.action.id);
-    }).catch(async cause => {
-      if (cancelled) return;
-      if (cause instanceof ApiError && cause.status === 404) {
-        try {
-          const previous = await api.getProposal(saved);
-          if (!cancelled) setProposal(previous.proposal);
-        } catch (error) {
-          if (!cancelled) {
-            if (error instanceof ApiError && [404, 409].includes(error.status)) {
-              sessionStorage.removeItem(recoveryKey); setApprovalStarted(false);
-            } else setProposalError('De vorige goedkeuring kon niet worden gecontroleerd. Herlaad de pagina voordat je opnieuw toevoegt.');
-          }
-        }
-      } else setProposalError('Een eerdere toevoeging kon niet worden opgehaald. Herlaad de pagina om de status te controleren voordat je opnieuw toevoegt.');
+    const stored = readSaved<PendingPurchase>(`${key}:purchase`);
+    if (!stored?.result || stored.actionId) { setRecovering(false); return; }
+    void api.getProposalAction(stored.result.proposal.id).then(result => {
+      if (!cancelled) {
+        const next = { ...stored, actionId: result.action.id };
+        localStorage.setItem(`${key}:purchase`, JSON.stringify(next)); setPurchase(next);
+      }
+    }).catch(cause => {
+      if (!cancelled && !(cause instanceof ApiError && cause.status === 404)) setError('De vorige toevoeging kon niet worden gecontroleerd. Probeer dezelfde toevoeging opnieuw om de status op te halen.');
     }).finally(() => { if (!cancelled) setRecovering(false); });
     return () => { cancelled = true; };
-  }, [recoveryKey]);
-  const requestVersions = useRef(new Map<string, number>());
-  const nextRequestVersion = useRef(0);
-
+  }, [key]);
   useEffect(() => {
-    setSuitable(new Set());
-    setBasisConfirmed(new Set());
-    setResults({});
-    setErrors({});
-    setSearchedQueries({});
-    setProposal(null);
-    setProposalError('');
-    requestVersions.current.clear();
-    setLoading(new Set());
-  }, [servings, recipe.id]);
-  useEffect(() => () => { requestVersions.current.clear(); }, []);
-
-  const search = async (ingredient: RecipeIngredientDto) => {
-    const query = (queries[ingredient.id] ?? ingredient.normalizedName ?? ingredient.originalText).trim();
-    if (!query) { setErrors(current => ({ ...current, [ingredient.id]: 'Vul een zoekterm in.' })); return; }
-    const version = ++nextRequestVersion.current;
-    requestVersions.current.set(ingredient.id, version);
-    setLoading(current => new Set(current).add(ingredient.id));
-    setErrors(current => ({ ...current, [ingredient.id]: '' }));
-    try {
-      const response = await api.searchPicnicProducts(query);
-      if (requestVersions.current.get(ingredient.id) !== version) return;
-      setResults(current => ({ ...current, [ingredient.id]: response.products }));
-      setSearchedQueries(current => ({ ...current, [ingredient.id]: query }));
-      setSuitable(current => { const next = new Set(current); response.products.forEach(product => next.delete(choiceKey(ingredient.id, product.id))); return next; });
-      setBasisConfirmed(current => { const next = new Set(current); response.products.forEach(product => next.delete(choiceKey(ingredient.id, product.id))); return next; });
-    } catch (cause) {
-      if (requestVersions.current.get(ingredient.id) !== version) return;
-      if (cause instanceof ApiError && cause.status === 401) onAuthExpired();
-      else setErrors(current => ({ ...current, [ingredient.id]: cause instanceof Error ? cause.message : 'Producten zoeken is niet gelukt.' }));
-    } finally {
-      if (requestVersions.current.get(ingredient.id) === version) setLoading(current => { const next = new Set(current); next.delete(ingredient.id); return next; });
+    if (purchase) return;
+    if (!validServings(recipe.baseServings) || !validServings(servings)) { setPlan(null); setLoading(false); return; }
+    let active = true;
+    setLoading(true); setError(''); setPlan(current => current?.recipeId === recipe.id && current.recipeVersion === recipe.version && current.servings === servings ? current : null);
+    const cacheKey = `${recipe.id}:${recipe.version}:${servings}:${refresh}`;
+    if (requestCache.current?.key !== cacheKey) {
+      // Only the initial automatic request shares the import budget. Explicit
+      // quantity changes and refreshes start a new read-only retrieval attempt.
+      const firstRequest = requestCache.current === null && refresh === 0;
+      requestCache.current = {key:cacheKey,promise:api.shoppingPlan(recipe.id,servings,refresh>0,
+        firstRequest ? initialDeadlineAt : undefined,
+        firstRequest && clientDeadlineAt !== undefined ? Math.max(1,clientDeadlineAt-Date.now()) : 30_000)};
     }
-  };
+    void requestCache.current.promise.then(({ plan: next }) => {
+      if (!active) return;
+      const saved = readSaved<{ servings: string; version: number; choices: Record<string, Choice> }>(key);
+      const restored = saved?.servings === servings && saved.version === recipe.version ? saved.choices : {};
+      setChoices(Object.fromEntries(next.rows.map(row => [row.id, restoreShoppingChoice(row, restored?.[row.id])])));
+      setPlan(next);
+    }).catch(cause => {
+      if (!active) return;
+      if (cause instanceof ApiError && cause.status === 401) onAuthExpired();
+      else setError(cause instanceof Error ? cause.message : 'Boodschappen zoeken is niet gelukt.');
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [recipe, servings, refresh, key, onAuthExpired, purchase, initialDeadlineAt, clientDeadlineAt]);
+  useEffect(() => {
+    if (plan && plan.servings === servings && !purchase && !loading) localStorage.setItem(key, JSON.stringify({ servings, version: recipe.version, choices }));
+  }, [key, plan, choices, servings, recipe.version, purchase, loading]);
+  const update = (id: string, change: Partial<Choice>) => setChoices(current => ({ ...current, [id]: { ...current[id], ...change } }));
+  const selected = useMemo(() => (plan?.rows ?? []).flatMap(row => {
+    const choice = choices[row.id];
+    const candidate = row.candidates.find(item => item.product.id === choice?.productId);
+    return choice?.selected && candidate && (candidate.match === 'suitable' || candidate.match === 'substitution' && choice.substitutionAccepted) && choice.count !== null && choice.count >= 1 && Number.isSafeInteger(choice.count) && choice.count <= 10_000 && candidate.product.priceCertainty === 'known' && candidate.product.displayPriceCents !== null
+      ? [{ row, choice, candidate }] : [];
+  }), [plan, choices]);
+  const productCount = new Set(selected.map(item => item.candidate.product.id)).size;
+  const total = selected.reduce((sum, item) => sum + item.choice.count! * unitPriceForPacks(item.candidate.product, item.choice.count!)!, 0);
+  const missing = plan?.rows.filter(row => !row.pantry && !choices[row.id]?.productId) ?? [];
+  const uncounted = plan?.rows.filter(row => choices[row.id]?.selected && !validCount(choices[row.id]?.count)) ?? [];
 
-  const toggleSuitable = (productKey: string, checked: boolean) => {
-    setSuitable(current => { const next = new Set(current); checked ? next.add(productKey) : next.delete(productKey); return next; });
-    if (!checked) setBasisConfirmed(current => { const next = new Set(current); next.delete(productKey); return next; });
-  };
-
-  const choices = useMemo(() => recipe.ingredients.map(ingredient => ({
-    ingredientId: ingredient.id,
-    ...planIngredientProducts({ ingredient, baseServings: recipe.baseServings, requestedServings: servings,
-      products: results[ingredient.id] ?? [],
-      suitableProductIds: new Set((results[ingredient.id] ?? []).filter(product => suitable.has(choiceKey(ingredient.id, product.id))).map(product => product.id)),
-      confirmedProductBasisIds: new Set((results[ingredient.id] ?? []).filter(product => basisConfirmed.has(choiceKey(ingredient.id, product.id))).map(product => product.id)) }),
-  })), [recipe, servings, results, suitable, basisConfirmed]);
-
-  const proposalChoices = choices.flatMap(choice => {
-    if (choice.status !== 'selected' || choice.selection.status !== 'selected' || !choice.selection.selected) return [];
-    const packageChoice = choice.selection.selected.packageCounts[0];
-    const query = searchedQueries[choice.ingredientId];
-    return packageChoice && query ? [{ ingredientId: choice.ingredientId, productId: packageChoice.productId, query, basis: choice.basis }] : [];
-  });
-  const choiceSignature = JSON.stringify([recipe.id, recipe.version, servings, proposalChoices]);
-  const currentSignature = useRef(choiceSignature);
-  currentSignature.current = choiceSignature;
-  useEffect(() => { setProposal(null); }, [choiceSignature]);
-  const canCreateProposal = !approvalStarted && !recovering && !proposalPending && recipe.ingredients.length > 0 && proposalChoices.length === recipe.ingredients.length &&
-    choices.every(choice => choice.status === 'selected' && choice.selection.status === 'selected' && choice.selection.selected?.packageCounts.length === 1);
-
-  const createProposal = async () => {
-    if (!canCreateProposal) return;
-    setProposalPending(true);
-    setProposalError('');
-    setProposal(null);
+  async function saveBase(event: React.FormEvent) {
+    event.preventDefault(); if (!validServings(baseServings) || working.current) return;
+    working.current = true; setBusy(true); setError('');
     try {
-      const result = await api.createProposal({ recipeId: recipe.id, recipeVersion: recipe.version, servings: servings.trim(), choices: proposalChoices });
-      if (currentSignature.current === choiceSignature) setProposal(result.proposal);
+      const updated = await api.updateRecipe(recipe.id, recipe.version, { title: recipe.title, sourceLabel: recipe.sourceLabel, sourceUrl: recipe.sourceUrl,
+        baseServings, steps: recipe.steps, ingredients: recipe.ingredients, uploads: recipe.uploads.map(item => item.id) });
+      setRecipe(updated.recipe);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Bewaren is niet gelukt.'); }
+    finally { working.current = false; setBusy(false); }
+  }
+  async function add() {
+    if (working.current || recovering || (!purchase && !selected.length)) return;
+    working.current = true; setBusy(true); setError('');
+    let intent = purchase ?? readSaved<PendingPurchase>(`${key}:purchase`);
+    try {
+      if (!intent) {
+        const input: ShoppingProposalInput = { requestId: '', recipeId: recipe.id, recipeVersion: recipe.version, servings,
+          choices: selected.map(({ row, choice, candidate }) => ({ groupId: row.id, productId: candidate.product.id,
+            assessmentId: candidate.assessment?.id, packCount: choice.count!, substitutionAccepted: choice.substitutionAccepted, remember: choice.remember,
+            expectedPriceCents: unitPriceForPacks(candidate.product, choice.count!)! })).sort((a, b) => a.groupId.localeCompare(b.groupId)) };
+        // Deterministic across tabs/reloads; only an explicit next purchase creates a new round.
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([ownerId, input, localStorage.getItem(`${key}:round`) ?? 'first'])));
+        input.requestId = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+        intent = { input }; persistPurchase(intent);
+      }
+      if (!intent.result) { intent = { ...intent, result: await api.prepareShopping(intent.input) }; persistPurchase(intent); }
+      const response = await api.approveProposal(intent.result!.proposal.id, intent.result!.proposal.version);
+      persistPurchase({ ...intent, actionId: response.action.id });
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onAuthExpired();
-      else setProposalError(cause instanceof Error ? cause.message : 'Het voorstel kon niet worden gecontroleerd.');
-    } finally { setProposalPending(false); }
-  };
+      // Before proposal creation, explicit 4xx errors prove that no action was sent.
+      else if (cause instanceof ApiError && !intent?.result && cause.status >= 400 && cause.status < 500) {
+        localStorage.removeItem(`${key}:purchase`); setPurchase(null);
+        setError(cause.message);
+      } else if (cause instanceof ApiError && cause.status === 409 && intent?.result) {
+        try {
+          const response = await api.getProposalAction(intent.result.proposal.id);
+          persistPurchase({ ...intent, actionId: response.action.id });
+        } catch (check) {
+          if (check instanceof ApiError && check.status === 404) {
+            localStorage.removeItem(`${key}:purchase`); setPurchase(null); setRefresh(value => value + 1);
+            setError('Deze bevestiging is verlopen of gewijzigd. Er is niets verstuurd; controleer de actuele selectie.');
+          } else setError('De vorige toevoeging kon niet worden gecontroleerd. Hervat dezelfde toevoeging.');
+        }
+      } else setError(cause instanceof Error ? `${cause.message} Hervat dezelfde toevoeging; die wordt niet dubbel verstuurd.` : 'Uitkomst onbekend. Hervat dezelfde toevoeging.');
+    } finally { working.current = false; setBusy(false); }
+  }
+  function nextPurchase() {
+    localStorage.setItem(`${key}:round`, crypto.randomUUID()); localStorage.removeItem(`${key}:purchase`);
+    setPurchase(null); setPlan(null); setChoices({}); setRefresh(value => value + 1);
+  }
+  if (purchase?.actionId) return <section className="shopping-page"><Button variant="ghost" onClick={onBack}><ArrowLeft /> Alle recepten</Button>
+    {purchase.result?.unavailable.length ? <p role="status" className="shopping-warning">Niet verstuurd; beschikbaarheid kon niet worden bevestigd: {purchase.result.unavailable.map(item => item.name).join(', ')}.</p> : null}
+    <AdditionStatus id={purchase.actionId} onAuthExpired={onAuthExpired} onNewProposal={nextPurchase} /></section>;
 
-  const approve = async () => {
-    if (!proposal || approving || actionId || recovering) return;
-    setApproving(true); setApprovalStarted(true); setProposalError('');
-    sessionStorage.setItem(recoveryKey, proposal.id);
-    try {
-      const result = await api.approveProposal(proposal.id, proposal.version);
-      setActionId(result.action.id);
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) onAuthExpired();
-      else setProposalError(cause instanceof Error ? cause.message : 'De toevoeging kon niet worden bevestigd. Probeer dezelfde goedkeuring opnieuw; die maakt geen dubbele actie.');
-    } finally { setApproving(false); }
-  };
-
-  if (actionId) return <><Button variant="ghost" onClick={onBack}>← Terug naar recept</Button><AdditionStatus id={actionId} onAuthExpired={onAuthExpired} onNewProposal={() => {
-    sessionStorage.removeItem(recoveryKey); setActionId(null); setProposal(null); setApprovalStarted(false);
-    setSuitable(new Set()); setBasisConfirmed(new Set()); setResults({});
-  }} /></>;
-
-  return <article className="recipe-detail" aria-labelledby="product-choice-title">
-    <div className="recipe-detail-top"><Button type="button" variant="ghost" onClick={onBack}>← Terug naar recept</Button></div>
-    <p className="eyebrow">Producten kiezen</p>
-    <h2 id="product-choice-title">{recipe.title}</h2>
-    <p className="subtle">Zoek per ingrediënt en markeer zelf welke Picnic-producten geschikt zijn. Alleen bevestigde producten met een bekende prijs tellen mee.</p>
-    <fieldset disabled={approvalStarted || recovering || proposalPending} className="min-w-0">
-    <div className="panel form-stack">
-      <label htmlFor="target-servings">Porties</label>
-      <input id="target-servings" inputMode="decimal" value={servings} disabled={proposalPending} onChange={event => setServings(event.target.value)} placeholder="Bijvoorbeeld 2 of 1/2" aria-describedby="servings-help" />
-      <small id="servings-help">Hoeveelheden worden exact geschaald vanaf {recipe.baseServings || 'onbekend aantal'} basisporties. Vul porties in het recept aan als dat nodig is.</small>
-    </div>
-    {recipe.ingredients.map((ingredient, index) => {
-      const query = queries[ingredient.id] ?? ingredient.normalizedName ?? ingredient.originalText;
-      const products = results[ingredient.id] ?? [];
-      const choice = choices[index];
-      const need = ingredient.quantity;
-      const basisLabel = need.basis === 'drained' ? 'uitgelekt' : 'netto';
-      return <section className="panel" key={ingredient.id} aria-labelledby={`ingredient-${ingredient.id}`}>
-        <h3 id={`ingredient-${ingredient.id}`}>{ingredient.originalText}</h3>
-        {choice.status === 'unresolved' ? <p role="alert">{choice.reason} <Button type="button" variant="link" onClick={onEdit}>Recept bewerken</Button></p>
-          : <p>Benodigd: {formatRational(parseChoiceNeeded(choice.needed))} {choice.unit}{choice.basis ? ` (${choice.basis === 'drained' ? 'uitgelekt' : 'netto'})` : ''}</p>}
-        <div className="form-stack">
-          <label htmlFor={`search-${ingredient.id}`}>Zoekproduct voor {ingredient.originalText}</label>
-          <input id={`search-${ingredient.id}`} type="search" value={query} onChange={event => setQueries(current => ({ ...current, [ingredient.id]: event.target.value }))} />
-          <Button type="button" variant="outline" disabled={proposalPending || loading.has(ingredient.id)} onClick={() => void search(ingredient)}>{loading.has(ingredient.id) ? 'Zoeken…' : 'Zoek producten'}</Button>
+  const popup = plan?.rows.find(row => row.id === openRow);
+  const locked = busy || recovering || !!purchase;
+  function choose(row: ShoppingRow, candidate: ShoppingCandidate) {
+    update(row.id, { productId: candidate.product.id, count: candidate.packCount, selected: true, changed: true, remember: false,
+      substitutionAccepted: candidate.match === 'substitution' });
+    setOpenRow(null);
+  }
+  function renderRow(row: ShoppingRow) {
+    const choice = choices[row.id];
+    if (!choice) return null;
+    const candidate = row.candidates.find(item => item.product.id === choice.productId);
+    return <li key={row.id} className={`shopping-row ${choice.selected ? '' : 'shopping-row-unselected'}`}>
+      <div className="shopping-ingredient"><input type="checkbox" aria-label={`${row.name} toevoegen`} checked={choice.selected} disabled={locked || !candidate} onChange={event => update(row.id, { selected: event.target.checked })} />
+        <div><strong>{row.name}</strong><span className="shopping-source">{sourceText(row)}</span>
+          {row.sources.length > 1 && <small>{row.sources.length} bronregels samengeteld</small>}
+          {row.demand && <small>Voor {servings} personen: {row.demand.amount} {row.demand.unit === 'piece' ? 'stuks' : row.demand.unit}</small>}
         </div>
-        {errors[ingredient.id] && <p role="alert" className="recipe-error">{errors[ingredient.id]}</p>}
-        {products.length > 0 && <ul className="ingredient-list" aria-label={`Zoekresultaten voor ${ingredient.originalText}`}>
-          {products.map(product => {
-            const problem = candidateProblem(product, ingredient);
-            const requiresBasis = need.unit !== 'piece' && product.quantity?.basis == null;
-            const id = choiceKey(ingredient.id, product.id);
-            const checked = suitable.has(id);
-            return <li key={product.id}>
-              <strong>{product.name}</strong> · {packageText(product)} · {product.displayPriceCents === null ? 'Prijs onbekend' : euro(product.displayPriceCents)}{unitPriceText(product) ? ` (${unitPriceText(product)})` : ''}
-              {requiresBasis && !problem && <label className="product-basis-confirmation">
-                <input type="checkbox" disabled={proposalPending} checked={basisConfirmed.has(id)} onChange={event => setBasisConfirmed(current => {
-                  const next = new Set(current); event.target.checked ? next.add(id) : next.delete(id); return next;
-                })} />
-                Ik bevestig dat deze verpakking {basisLabel} is
-              </label>}
-              <label className="product-suitable-choice">
-                <input type="checkbox" checked={checked} disabled={proposalPending || !!problem || requiresBasis && !basisConfirmed.has(id)} onChange={event => toggleSuitable(id, event.target.checked)} />
-                Geschikt voor dit recept
-              </label>
-              {problem && <small>{problem}</small>}
-            </li>;
-          })}
-        </ul>}
-        {choice.status === 'selected' && choice.selection.status === 'selected' && choice.selection.selected && <p role="status">Gekozen: {choice.selection.selected.packageCounts.reduce((sum, item) => sum + item.count, 0)} {choice.selection.selected.packageCounts.reduce((sum, item) => sum + item.count, 0) === 1 ? 'verpakking' : 'verpakkingen'} · totaal {euro(choice.selection.selected.totalCents)} · overschot {choice.selection.selected.overshoot} {choice.selection.selected.unit}</p>}
-        {products.length > 0 && choice.status === 'selected' && choice.selection.status === 'unresolved' && <p role="status">{choice.selection.reason === 'incompatible_units' || choice.selection.reason === 'missing_basis'
-          ? 'Geen geschikt product met dezelfde eenheid en basis. Bewerk de hoeveelheid in het recept of kies andere producten.'
-          : 'Met deze producten kan geen voldoende verpakking worden samengesteld. Kies meer geschikte resultaten.'}</p>}
-      </section>;
-    })}
-    </fieldset>
-    <section className="panel" aria-labelledby="proposal-review-heading">
-      <h3 id="proposal-review-heading">Voorstel controleren</h3>
-      <p>Controleer alle productkeuzes. We halen de actuele prijzen op en rekenen uit hoeveel verpakkingen nodig zijn.</p>
-      {proposalError && <p role="alert" className="recipe-error">{proposalError}</p>}
-      <Button type="button" disabled={!canCreateProposal} onClick={() => void createProposal()}>{proposalPending ? 'Voorstel controleren…' : 'Voorstel controleren'}</Button>
-      {!canCreateProposal && !proposalPending && <p className="subtle">Zoek producten en markeer voor elk ingrediënt een geschikte keuze met bekende prijs.</p>}
-      {proposal && <div role="status" aria-live="polite"><h4>Voorstel gecontroleerd</h4>
-        <p>{proposal.servings} porties · totaal {euro(proposal.totalPriceCents)}</p>
-        <ul>{proposal.needs.map(need => <li key={need.id}>{need.name}: {need.product.packCount} × {need.product.name} · {euro(need.product.priceCents * need.product.packCount)} · overschot {need.product.overshoot} {need.product.suppliedUnit}</li>)}</ul>
-        <p>Voeg deze producten toe aan je Picnic-mand. Je bestelt en betaalt pas in Picnic.</p>
-        <Button disabled={approving || recovering} onClick={() => void approve()}>{approving ? 'Goedkeuring verwerken…' : `Akkoord, voeg toe voor ${euro(proposal.totalPriceCents)}`}</Button>
-      </div>}
-    </section>
+      </div>
+      <div className="shopping-product">
+        <button type="button" className="shopping-product-open" disabled={locked} onClick={() => setOpenRow(row.id)} aria-label={`Product kiezen voor ${row.name}`}>
+          <span><strong>{candidate?.product.name ?? (choice.note ?? row.error ?? 'Geen passende match')}</strong><span>{candidate ? `${candidate.product.unitQuantity} · ${candidate.product.displayPriceCents === null ? 'Prijs onbekend' : euro(candidate.product.displayPriceCents)}` : 'Bekijk alternatieven'}</span></span><ChevronDown size={18} />
+        </button>
+        {candidate && <>
+          <div className="shopping-count"><label htmlFor={`count-${row.id}`}>Verpakkingen</label><input id={`count-${row.id}`} aria-label={`Aantal verpakkingen ${row.name}`} type="number" min="1" max={candidate.product.maxCount ?? 10000} value={choice.count ?? ''} placeholder="Aantal" disabled={locked} onChange={event => update(row.id, { count: event.target.value ? Number(event.target.value) : null, countChanged: true })} />
+            <strong>{choice.count && candidate.product.displayPriceCents !== null ? euro(choice.count * unitPriceForPacks(candidate.product, choice.count)!) : 'Kies aantal'}</strong></div>
+          {candidate.match === 'substitution' && <small className="shopping-warning">Zelf gekozen vervanging · controleer of deze past.</small>}
+          {candidate.estimates.length > 0 && <details className="shopping-estimate"><summary>{candidate.estimates.some(note => /schat/i.test(note)) ? 'Aantal op basis van schatting' : 'Berekening bekijken'}</summary>{candidate.estimates.map(note => <p key={note}>{note}</p>)}</details>}
+          {row.preferred && !choice.changed && <small>Jouw onthouden keuze</small>}
+          {choice.changed && candidate.match === 'suitable' && <label className="shopping-remember"><input type="checkbox" checked={choice.remember} disabled={locked} onChange={event => update(row.id, { remember: event.target.checked })} /> Onthoud mijn keuze voor dit ingrediënt</label>}
+        </>}
+      </div>
+    </li>;
+  }
+  return <article className="shopping-page" aria-labelledby="shopping-title">
+    <Button variant="ghost" onClick={onBack}><ArrowLeft aria-hidden="true" /> Alle recepten</Button>
+    <header className="shopping-heading"><p className="eyebrow">Jouw boodschappen</p><h1 id="shopping-title">{recipe.title}</h1>
+      <p>Passende producten voor je recept. Vink uit wat je al hebt en pas aan wat je wilt.</p>
+      <label className="shopping-servings" htmlFor="shopping-servings">Personen <input id="shopping-servings" type="number" min="1" max="1000" value={servings} disabled={locked} onChange={event => setServings(event.target.value)} /></label>
+    </header>
+    {error && <p role="alert" className="recipe-error">{error}</p>}
+    {!validServings(recipe.baseServings) && <form className="panel form-stack" onSubmit={saveBase}><label htmlFor="shopping-base">Voor hoeveel personen is het oorspronkelijke recept?</label><input id="shopping-base" type="number" min="1" max="1000" required value={baseServings} onChange={event => setBaseServings(event.target.value)} /><Button disabled={busy || !validServings(baseServings)}>Bereken mijn boodschappen</Button></form>}
+    {loading && <div className="shopping-loading" role="status"><LoaderCircle className="animate-spin" /> We zoeken passende producten en vergelijken verpakkingen…</div>}
+    {!loading && !plan && !purchase && validServings(recipe.baseServings) && <Button variant="outline" disabled={!validServings(servings)} onClick={() => setRefresh(value => value + 1)}>Boodschappen ophalen</Button>}
+    {plan && <>
+      <div className="shopping-column-labels" aria-hidden="true"><span>Ingrediënt</span><span>Picnic-product</span></div>
+      <ul className="shopping-list">{plan.rows.filter(row => !row.pantry).map(renderRow)}</ul>
+      {plan.rows.some(row => row.pantry) && <section className="shopping-pantry"><h2>Waarschijnlijk in je keukenkastje</h2><p>Zout, zwarte peper en gewone bakolie staan uit. Vink ze aan als je ze nodig hebt.</p><ul className="shopping-list">{plan.rows.filter(row => row.pantry).map(renderRow)}</ul></section>}
+      <div className="shopping-footer">
+        {missing.length > 0 && <p className="shopping-warning" role="status">Nog geen passende match: {missing.map(row => row.name).join(', ')}. Deze ingrediënten gaan niet mee.</p>}
+        {uncounted.length > 0 && <p className="shopping-warning">Geen aantal gekozen: {uncounted.map(row => row.name).join(', ')}. Deze regels gaan niet mee.</p>}
+        <div className="shopping-checkout"><span><strong>{euro(total)}</strong><small>{selected.reduce((sum, item) => sum + item.choice.count!, 0)} verpakkingen · {productCount} {productCount === 1 ? 'product' : 'producten'}</small></span>
+          <Button size="lg" disabled={locked || !productCount || loading || !validServings(servings) || plan.servings !== servings} onClick={() => void add()}><ShoppingBasket aria-hidden="true" /> {busy ? 'Toevoegen…' : `Voeg ${productCount} ${productCount === 1 ? 'product' : 'producten'} toe`}</Button></div>
+        <p className="subtle">Toevoegen aan je bestaande mandje. Bestellen en betalen doe je in Picnic.</p>
+        <Button variant="link" disabled={locked} onClick={() => setRefresh(value => value + 1)}>Producten en prijzen vernieuwen</Button>
+      </div>
+    </>}
+    {purchase && !purchase.actionId && <section className="panel" role="status"><p>{busy ? 'Je selectie wordt gecontroleerd en toegevoegd…' : 'Je bevestiging is bewaard. Hervat dezelfde toevoeging om veilig verder te gaan.'}</p><Button disabled={busy || recovering} onClick={() => void add()}>{busy ? 'Bezig…' : 'Hervat dezelfde toevoeging'}</Button></section>}
+    <Dialog open={!!popup} onOpenChange={open => { if (!open) setOpenRow(null); }}><DialogContent className="shopping-dialog"><DialogHeader><DialogTitle>{popup?.name}</DialogTitle><DialogDescription>{popup ? sourceText(popup) : ''}</DialogDescription></DialogHeader>
+      {popup?.candidatesTruncated && <p className="subtle">Een deel van de zoekresultaten is bekeken; dit is geen volledig assortiment.</p>}
+      {popup && <div className="shopping-alternatives">{(['suitable', 'substitution', 'unresolved'] as const).map(match => <section key={match}><h3>{match === 'suitable' ? 'Passende alternatieven' : match === 'substitution' ? 'Mogelijke vervangingen · zelf beoordelen' : 'Nog onvoldoende informatie'}</h3>
+        {!popup.candidates.some(item => item.match === match) && <p>Geen resultaten gevonden.</p>}
+        {popup.candidates.filter(item => item.match === match).map(item => <button key={item.product.id} type="button" disabled={match === 'unresolved' || item.product.priceCertainty !== 'known' || item.product.quantity?.kind !== 'exact'} onClick={() => choose(popup, item)}>
+          <strong>{item.product.name}</strong>{item.product.brand && <small>{item.product.brand}</small>}<span>{item.product.unitQuantity} · {item.product.displayPriceCents === null ? 'Prijs onbekend' : euro(item.product.displayPriceCents)}</span>
+          <span>{item.packCount ? `${item.packCount} verpakkingen · ${euro(item.totalPriceCents ?? 0)}` : 'Kies het aantal na selectie'}</span>{item.assessment && <small>{item.assessment.reason}</small>}<b>{match === 'suitable' ? 'Kies dit product' : match === 'substitution' ? 'Kies deze vervanging' : 'Niet geselecteerd'}</b>
+        </button>)}
+      </section>)}</div>}
+    </DialogContent></Dialog>
   </article>;
 }
-
-function parseChoiceNeeded(value: string) {
-  const [numerator, denominator = '1'] = value.split('/');
-  return { numerator: Number(numerator), denominator: Number(denominator) };
-}
-
-function choiceKey(ingredientId: string, productId: string): string { return `${ingredientId}\u0000${productId}`; }

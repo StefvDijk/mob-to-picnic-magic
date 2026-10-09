@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "schema-demo-synthetic-v1",
+  "evidence": "Invented schema demo only; no real recipe or independently labelled quality evidence.",
+  "counts": {
+    "expectedIngredients": 2,
+    "observedIngredients": 2,
+    "missingIngredients": 1,
+    "extraIngredients": 1,
+    "ingredientFieldsCorrect": 0,
+    "eligibleProducts": 2,
+    "candidatesRecalled": 1,
+    "selected": 1,
+    "automaticSelected": 1,
+    "automaticCorrect": 0,
+    "abstentions": 1,
+    "unavailableProducts": 0
+  },
+  "wholeRecipePass": {
+    "numerator": 0,
+    "denominator": 1,
+    "rate": 0
+  },
+  "wholeRecipeWithin30Seconds": {
+    "numerator": 0,
+    "denominator": 1,
+    "rate": 0
+  },
+  "ingredientFieldAccuracy": {
+    "numerator": 0,
+    "denominator": 2,
+    "rate": 0
+  },
+  "candidateRecall": {
+    "numerator": 1,
+    "denominator": 2,
+    "rate": 0.5
+  },
+  "selectionCoverage": {
+    "numerator": 1,
+    "denominator": 2,
+    "rate": 0.5
+  },
+  "automaticPrecision": {
+    "numerator": 0,
+    "denominator": 1,
+    "rate": 0
+  },
+  "abstention": {
+    "numerator": 1,
+    "denominator": 2,
+    "rate": 0.5
+  },
+  "latency": {
+    "measured": 1,
+    "missing": 0,
+    "p50Ms": 31000,
+    "p95Ms": 31000,
+    "within30Seconds": {
+      "numerator": 0,
+      "denominator": 1,
+      "rate": 0
+    }
+  },
+  "cost": {
+    "measured": 1,
+    "missing": 0,
+    "totalCents": 2
+  },
+  "splitScores": {
+    "development": {
+      "wholeRecipePass": {
+        "numerator": 0,
+        "denominator": 1,
+        "rate": 0
+      },
+      "wholeRecipeWithin30Seconds": {
+        "numerator": 0,
+        "denominator": 1,
+        "rate": 0
+      }
+    },
+    "test": {
+      "wholeRecipePass": {
+        "numerator": 0,
+        "denominator": 0,
+        "rate": null
+      },
+      "wholeRecipeWithin30Seconds": {
+        "numerator": 0,
+        "denominator": 0,
+        "rate": null
+      }
+    },
+    "challenge": {
+      "wholeRecipePass": {
+        "numerator": 0,
+        "denominator": 0,
+        "rate": null
+      },
+      "wholeRecipeWithin30Seconds": {
+        "numerator": 0,
+        "denominator": 0,
+        "rate": null
+      }
+    }
+  },
+  "unexpectedRecipeIds": [],
+  "recipes": [
+    {
+      "id": "demo-1",
+      "split": "development",
+      "sourceKind": "synthetic",
+      "language": "nl",
+      "qualityPass": false,
+      "wholeRecipePass": false,
+      "within30Seconds": false,
+      "wholeRecipeWithin30Seconds": false,
+      "latencyMs": 31000,
+      "costCents": 2,
+      "errors": [
+        {
+          "sourceId": "extra",
+          "category": "extra_ingredient"
+        },
+        {
+          "sourceId": "rice",
+          "category": "ingredient_fields",
+          "fields": [
+            "amount"
+          ]
+        },
+        {
+          "sourceId": "rice",
+          "category": "product_or_pack"
+        },
+        {
+          "sourceId": "onion",
+          "category": "missing_ingredient"
+        },
+        {
+          "sourceId": "onion",
+          "category": "abstention"
+        },
+        {
+          "category": "user_corrections",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}
