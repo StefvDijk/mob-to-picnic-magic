@@ -1,8 +1,14 @@
 import { requirePrincipal, type AuthEnv, type Principal } from '../auth';
 import { formatRational, parseQuantity, parseRational, type Quantity } from '../../shared/quantities';
 import type { RecipeDto, RecipeIngredientDto } from '../../shared/recipes';
+import type { SaveRecipeSelectionInput, SavedRecipeDto } from '../../shared/recipes';
 import type { ImportCandidate } from '../../shared/imports';
+import { recipeImageUrl } from '../../shared/recipe-image';
 import { getSessionAccess, sessionExpiryMillisSql } from '../db';
+import { shoppingGroups, validServings } from '../domain/shopping';
+import { candidateFor } from '../domain/shopping';
+import type { PicnicProduct, PicnicProductDetails } from '../../shared/picnic';
+import { assessStoredProduct } from '../matching/assessment';
 
 const NO_STORE = { 'Cache-Control': 'no-store, private', Pragma: 'no-cache' };
 const MAX_INGREDIENTS = 200;
@@ -175,11 +181,12 @@ export async function loadRecipe(env: AuthEnv, ownerId: string, id: string, incl
       .bind(ownerId, id).all<IngredientRow>(),
     env.DB.prepare(`SELECT ru.upload_id AS id FROM recipe_uploads ru JOIN uploads u ON u.owner_id=ru.owner_id AND u.id=ru.upload_id
       WHERE ru.owner_id=? AND ru.recipe_id=? AND u.status='stored' ORDER BY ru.upload_id`).bind(ownerId, id).all<{ id: string }>(),
-    includeSource ? env.DB.prepare(`SELECT source_kind AS sourceKind,source_label AS sourceLabel,source_url AS sourceUrl,
+    env.DB.prepare(`SELECT source_kind AS sourceKind,source_label AS sourceLabel,source_url AS sourceUrl,
       source_text AS sourceText,selected_candidate_json AS selectedCandidateJson,imported_at AS importedAt
-      FROM recipe_sources WHERE owner_id=? AND recipe_id=?`).bind(ownerId, id).first<RecipeSourceRow>() : Promise.resolve(null),
+      FROM recipe_sources WHERE owner_id=? AND recipe_id=?`).bind(ownerId, id).first<RecipeSourceRow>(),
   ]);
   return { id: row.id, title: row.title, sourceLabel: row.sourceLabel, sourceUrl: row.sourceUrl,
+    imageUrl: source ? recipeImageUrl(parseCandidate(source.selectedCandidateJson)?.imageUrl, source.sourceUrl) : null,
     baseServings: row.baseServingsNum === null ? null : formatRational({ numerator: row.baseServingsNum, denominator: row.baseServingsDen }),
     version: row.version, steps: safeArray(row.stepsJson),
     ingredients: ingredients.results.map(ingredient => ({ id: ingredient.id, ordinal: ingredient.ordinal,
@@ -443,6 +450,8 @@ async function deleteRecipe(env: AuthEnv, principal: Principal, id: string, deps
   const statements = [env.DB.prepare(`UPDATE recipes SET deleted_at=?,updated_at=?,version=version+1,write_token=?
     WHERE owner_id=? AND id=? AND deleted_at IS NULL AND ${liveSessionSql}`)
     .bind(now, now, writeToken, principal.ownerId, id, ...sessionArgs(principal, now)),
+  env.DB.prepare(`DELETE FROM saved_recipe_selections WHERE owner_id=? AND recipe_id=? AND ${ownsDeletion}`)
+    .bind(principal.ownerId, id, ...ownsArgs),
   env.DB.prepare(`UPDATE uploads AS u SET status='deleting',deleted_at=?
     WHERE u.owner_id=? AND u.status='stored' AND ${ownsDeletion} AND ${unsharedUpload}`)
     .bind(now, principal.ownerId, ...ownsArgs, id, id),
@@ -474,11 +483,136 @@ async function deleteRecipeSource(env: AuthEnv, principal: Principal, id: string
   return new Response(null, { status: 204, headers: NO_STORE });
 }
 
+interface SavedRecipeRow { recipeId: string; recipeTitle: string; recipeVersion: number; snapshotJson: string; updatedAt: number }
+function savedSnapshot(row: Pick<SavedRecipeRow, 'recipeId' | 'recipeTitle' | 'recipeVersion' | 'snapshotJson' | 'updatedAt'>): SavedRecipeDto | null {
+  try {
+    const value: unknown = JSON.parse(row.snapshotJson);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const snapshot = value as Record<string, unknown>;
+    if (typeof snapshot.servings !== 'string' || !Array.isArray(snapshot.choices) || !Array.isArray(snapshot.skippedGroupIds)) return null;
+    return { recipeId: row.recipeId, recipeTitle: row.recipeTitle, recipeVersion: row.recipeVersion,
+      servings: snapshot.servings,
+      choices: snapshot.choices.filter((raw): raw is SavedRecipeDto['choices'][number] => !!raw && typeof raw === 'object' &&
+        typeof (raw as SavedRecipeDto['choices'][number]).groupId === 'string' &&
+        typeof (raw as SavedRecipeDto['choices'][number]).groupName === 'string' &&
+        typeof (raw as SavedRecipeDto['choices'][number]).productId === 'string' &&
+        typeof (raw as SavedRecipeDto['choices'][number]).productName === 'string' &&
+        Number.isSafeInteger((raw as SavedRecipeDto['choices'][number]).packCount) &&
+        (raw as SavedRecipeDto['choices'][number]).packCount > 0 && (raw as SavedRecipeDto['choices'][number]).packCount <= 10_000 &&
+        typeof (raw as SavedRecipeDto['choices'][number]).substitutionAccepted === 'boolean'),
+      skippedGroupIds: snapshot.skippedGroupIds.filter((item): item is string => typeof item === 'string'), updatedAt: row.updatedAt };
+  } catch { return null; }
+}
+function parseSavedSelection(body: Record<string, unknown>): SaveRecipeSelectionInput | null {
+  if (!Number.isSafeInteger(body.recipeVersion) || Number(body.recipeVersion) <= 0 || !validServings(body.servings) ||
+      !Array.isArray(body.choices) || body.choices.length > MAX_INGREDIENTS ||
+      !Array.isArray(body.skippedGroupIds) || body.skippedGroupIds.length > MAX_INGREDIENTS) return null;
+  const choices: SaveRecipeSelectionInput['choices'] = [];
+  for (const raw of body.choices) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const item = raw as Record<string, unknown>;
+    if (typeof item.groupId !== 'string' || !item.groupId || item.groupId.length > 500 ||
+        typeof item.productId !== 'string' || !item.productId || item.productId.length > 100 ||
+        !Number.isSafeInteger(item.packCount) || Number(item.packCount) < 1 || Number(item.packCount) > 10_000 ||
+        typeof item.substitutionAccepted !== 'boolean') return null;
+    choices.push({ groupId: item.groupId, productId: item.productId, packCount: Number(item.packCount), substitutionAccepted: item.substitutionAccepted });
+  }
+  const skippedGroupIds = body.skippedGroupIds;
+  if (!skippedGroupIds.every((item): item is string => typeof item === 'string' && !!item && item.length <= 500) ||
+      new Set(choices.map(item => item.groupId)).size !== choices.length || new Set(skippedGroupIds).size !== skippedGroupIds.length ||
+      choices.some(item => skippedGroupIds.includes(item.groupId))) return null;
+  return { recipeVersion: Number(body.recipeVersion), servings: body.servings, choices, skippedGroupIds };
+}
+async function saveRecipeSelection(request: Request, env: AuthEnv, principal: Principal, id: string): Promise<Response> {
+  const body = await readBody(request);
+  const input = body && parseSavedSelection(body);
+  if (!input) return fail(400, 'INVALID_SELECTION', 'Controleer je productkeuzes en overgeslagen ingrediënten.');
+  const recipe = await loadRecipe(env, principal.ownerId, id, false);
+  if (!recipe) return fail(404, 'NOT_FOUND', 'Niet gevonden.');
+  if (recipe.version !== input.recipeVersion) return fail(409, 'RECIPE_STALE', 'Het recept is gewijzigd. Controleer je boodschappen opnieuw.');
+  if (!validServings(recipe.baseServings)) return fail(422, 'BASE_SERVINGS_REQUIRED', 'Voor hoeveel personen is het oorspronkelijke recept?');
+  let groups;
+  try { groups = shoppingGroups(recipe, input.servings); }
+  catch { return fail(422, 'BASE_SERVINGS_REQUIRED', 'Voor hoeveel personen is het oorspronkelijke recept?'); }
+  const groupIds = new Set(groups.map(group => group.id));
+  const suppliedIds = new Set([...input.choices.map(choice => choice.groupId), ...input.skippedGroupIds]);
+  if (suppliedIds.size !== groupIds.size || [...suppliedIds].some(groupId => !groupIds.has(groupId)) ||
+      [...groupIds].some(groupId => !suppliedIds.has(groupId))) return fail(400, 'INVALID_SELECTION', 'Kies of sla over elk ingrediënt.');
+  const productIds = [...new Set(input.choices.map(choice => choice.productId))];
+  const connection = productIds.length ? await env.DB.prepare(`SELECT id,generation FROM connections WHERE owner_id=? AND status='connected' LIMIT 1`)
+    .bind(principal.ownerId).first<{ id: string; generation: number }>() : null;
+  if (productIds.length && !connection) return fail(409, 'PICNIC_NOT_CONNECTED', 'Koppel eerst je Picnic-account.');
+  const catalog = new Map<string, { product: PicnicProduct; details?: PicnicProductDetails }>();
+  for (let offset = 0; offset < productIds.length; offset += 80) {
+    const chunk = productIds.slice(offset, offset + 80);
+    const productRows = await env.DB.prepare(`SELECT p.product_id AS productId,p.product_json AS productJson,p.details_json AS detailsJson
+      FROM catalog_products p JOIN connections c ON c.owner_id=p.owner_id AND c.id=p.connection_id AND c.generation=p.connection_generation
+      WHERE p.owner_id=? AND p.connection_id=? AND p.connection_generation=? AND c.status='connected'
+        AND p.product_id IN (${chunk.map(() => '?').join(',')})`)
+      .bind(principal.ownerId, connection!.id, connection!.generation, ...chunk)
+      .all<{ productId: string; productJson: string; detailsJson: string | null }>();
+    for (const row of productRows.results) {
+      try {
+        const product = JSON.parse(row.productJson) as PicnicProduct;
+        const details = row.detailsJson ? JSON.parse(row.detailsJson) as PicnicProductDetails : undefined;
+        if (product.id === row.productId && typeof product.name === 'string') catalog.set(row.productId, { product, details });
+      } catch { /* Invalid cached data cannot authorize a saved product. */ }
+    }
+  }
+  const choices: SavedRecipeDto['choices'] = [];
+  for (const choice of input.choices) {
+    const group = groups.find(item => item.id === choice.groupId)!;
+    const cached = catalog.get(choice.productId);
+    if (!cached || cached.product.isAvailable === false) return fail(422, 'PRODUCT_NOT_IN_CURRENT_CATALOG', 'Een gekozen product is niet meer bekend bij Picnic. Haal de boodschappen opnieuw op.');
+    const assessment = await assessStoredProduct(env.DB,
+      { ownerId: principal.ownerId, connectionId: connection!.id, generation: connection!.generation }, group, cached.product,
+      cached.details ? { details: cached.details } : undefined);
+    const candidate = candidateFor(group, cached.product, assessment);
+    if (candidate.match === 'unsuitable' || candidate.match === 'unresolved') return fail(422, 'MATCH_NOT_CONFIRMED', 'Een gekozen product is niet passend bevestigd.');
+    if (candidate.match === 'substitution' && !choice.substitutionAccepted) return fail(422, 'SUBSTITUTION_NOT_ACCEPTED', 'Bevestig een vervanging voordat je die bewaart.');
+    choices.push({ ...choice, groupName: group.name, productName: cached.product.name });
+  }
+  const snapshot = JSON.stringify({ servings: input.servings, choices, skippedGroupIds: input.skippedGroupIds });
+  const now = Date.now();
+  const currentConnection = connection ? `AND EXISTS(SELECT 1 FROM connections c WHERE c.owner_id=? AND c.id=?
+    AND c.generation=? AND c.status='connected')` : '';
+  const result = await env.DB.prepare(`INSERT INTO saved_recipe_selections(owner_id,recipe_id,recipe_version,snapshot_json,updated_at)
+    SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM recipes r JOIN app_accounts a ON a.id=r.owner_id
+      WHERE r.owner_id=? AND r.id=? AND r.version=? AND r.deleted_at IS NULL AND a.status='active' AND ${liveSessionSql}) ${currentConnection}
+    ON CONFLICT(owner_id,recipe_id) DO UPDATE SET recipe_version=excluded.recipe_version,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at`)
+    .bind(principal.ownerId, id, recipe.version, snapshot, now, principal.ownerId, id, input.recipeVersion,
+      ...sessionArgs(principal, now), ...(connection ? [principal.ownerId, connection.id, connection.generation] : [])).run();
+  if (result.meta.changes !== 1) return await accessFailure(env, principal) ?? fail(409, 'RECIPE_STALE', 'Het recept is gewijzigd. Controleer je boodschappen opnieuw.');
+  const savedRecipe = savedSnapshot({ recipeId: id, recipeTitle: recipe.title, recipeVersion: recipe.version, snapshotJson: snapshot, updatedAt: now });
+  return savedRecipe ? json({ savedRecipe }) : fail(503, 'SAVE_FAILED', 'De selectie kon niet worden bewaard.');
+}
+async function listSavedRecipes(request: Request, env: AuthEnv, principal: Principal): Promise<Response> {
+  const url = new URL(request.url);
+  const rawLimit = url.searchParams.get('limit');
+  const limit = rawLimit === null ? 20 : /^\d+$/.test(rawLimit) ? Number(rawLimit) : NaN;
+  const cursorText = url.searchParams.get('cursor');
+  const cursor = cursorText ? decodeCursor(cursorText) : null;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50 || (cursorText !== null && !cursor)) return fail(400, 'INVALID_PAGE', 'Ongeldige paginering.');
+  const rows = await env.DB.prepare(`SELECT s.recipe_id AS recipeId,r.title AS recipeTitle,s.recipe_version AS recipeVersion,
+    s.snapshot_json AS snapshotJson,s.updated_at AS updatedAt FROM saved_recipe_selections s JOIN recipes r
+    ON r.owner_id=s.owner_id AND r.id=s.recipe_id WHERE s.owner_id=? AND r.deleted_at IS NULL
+    AND (? IS NULL OR s.updated_at<? OR (s.updated_at=? AND s.recipe_id<?)) ORDER BY s.updated_at DESC,s.recipe_id DESC LIMIT ?`)
+    .bind(principal.ownerId, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.id ?? '', limit + 1)
+    .all<SavedRecipeRow>();
+  const more = rows.results.length > limit;
+  const page = rows.results.slice(0, limit);
+  const recipes = page.map(row => savedSnapshot(row)).filter((row): row is SavedRecipeDto => row !== null);
+  const last = page.at(-1);
+  return json({ recipes, nextCursor: more && last ? encodeCursor(last.updatedAt, last.recipeId) : null });
+}
+
 /** Returns null for paths owned by another route module. */
 export async function handleRecipes(request: Request, env: AuthEnv, deps: RecipeRouteDependencies = {}): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  const savedPath = path === '/api/recipes/saved';
+  const savedSelectionPath = /^\/api\/recipes\/[^/]+\/saved-selection$/.test(path);
   const sourcePath = /^\/api\/recipes\/[^/]+\/source$/.test(path);
-  const known = path === '/api/recipes' || /^\/api\/recipes\/[^/]+$/.test(path) || sourcePath;
+  const known = path === '/api/recipes' || /^\/api\/recipes\/[^/]+$/.test(path) || sourcePath || savedPath || savedSelectionPath;
   if (!known) return null;
   if (request.method !== 'GET') {
     const denied = requireOrigin(request, env);
@@ -486,6 +620,14 @@ export async function handleRecipes(request: Request, env: AuthEnv, deps: Recipe
   }
   const principal = await requirePrincipal(request, env);
   if (!principal) return fail(401, 'UNAUTHENTICATED', 'Log opnieuw in.');
+  if (savedPath) return request.method === 'GET' ? listSavedRecipes(request, env, principal) : fail(405, 'METHOD_NOT_ALLOWED', 'Gebruik GET.');
+  if (savedSelectionPath) {
+    if (request.method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', 'Gebruik POST.');
+    let id: string;
+    try { id = decodeURIComponent(path.slice('/api/recipes/'.length, -'/saved-selection'.length)); }
+    catch { return fail(400, 'INVALID_ID', 'Ongeldige receptverwijzing.'); }
+    return saveRecipeSelection(request, env, principal, id);
+  }
   if (path === '/api/recipes') {
     if (request.method === 'GET') return listRecipes(request, env, principal);
     if (request.method === 'POST') return createRecipe(request, env, principal, deps);

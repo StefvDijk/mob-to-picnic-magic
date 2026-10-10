@@ -5,6 +5,8 @@ import { handleAuth, type AuthDependencies, type AuthEnv } from '../auth';
 import { bootstrapAdmin } from '../db';
 import { handleRecipes } from './recipes';
 import { handleRequest } from '../index';
+import { shoppingGroups } from '../domain/shopping';
+import type { RecipeDto, SavedRecipeDto } from '../../shared/recipes';
 
 const db = env.DB;
 const testEnv: AuthEnv = {
@@ -97,6 +99,91 @@ beforeAll(async () => {
 });
 
 describe('authenticated recipe routes with D1', () => {
+  it('stores only explicit exact choices and lists them separately by owner', async () => {
+    const created = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Remembered flour'), baseServings: '2',
+      ingredients: [{ section: null, originalText: 'tarwebloem', normalizedName: 'tarwebloem', quantity: { kind: 'exact', amount: '200', unit: 'g' },
+        sourceOrigin: 'user', attributes: {}, uncertainty: [] }] }, memberCookie), testEnv);
+    expect(created?.status).toBe(201);
+    const recipe = (await created!.json() as { recipe: RecipeDto }).recipe;
+    const group = shoppingGroups(recipe, '4')[0];
+    const member = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const connectionId = crypto.randomUUID(), now = Date.now();
+    await db.prepare(`INSERT INTO connections(id,owner_id,status,generation,encrypted_resume_key,key_version,created_at,updated_at)
+      VALUES(?,?,'connected',1,'test-ciphertext','test-v1',?,?)`).bind(connectionId, member!.id, now, now).run();
+    const product = { id: 'sku-exact', name: 'Tarwebloem', unitQuantity: '100 g',
+      quantity: { kind: 'exact', amount: '100', unit: 'g', basis: null }, displayPriceCents: 50, priceCertainty: 'known', priceRanges: [],
+      identity: { groupId: 'sku-exact', variantId: 'sku-exact' } };
+    await db.prepare(`INSERT INTO catalog_products(owner_id,connection_id,connection_generation,product_id,product_json,content_fingerprint,
+      commercial_fingerprint,source_route,first_seen,checked_at) VALUES(?,?,1,?,?,'content','commercial','test',?,?)`)
+      .bind(member!.id, connectionId, product.id, JSON.stringify(product), now, now).run();
+    const payload = { recipeVersion: recipe.version, servings: '4',
+      choices: [{ groupId: group.id, productId: 'sku-exact', packCount: 3, substitutionAccepted: false }], skippedGroupIds: [] };
+    const saved = await handleRecipes(request(`/api/recipes/${recipe.id}/saved-selection`, 'POST', payload, memberCookie), testEnv);
+    expect(saved?.status).toBe(200);
+    expect(await saved!.json()).toMatchObject({ savedRecipe: { recipeId: recipe.id, recipeTitle: 'Remembered flour', recipeVersion: 1,
+      servings: '4', choices: [{ groupId: group.id, productId: 'sku-exact', productName: 'Tarwebloem', packCount: 3 }], skippedGroupIds: [] } });
+    const listed = await handleRecipes(request('/api/recipes/saved', 'GET', undefined, memberCookie), testEnv);
+    expect(await listed!.json()).toMatchObject({ recipes: [{ recipeId: recipe.id, choices: [{ productId: 'sku-exact', packCount: 3 }] }] });
+    const hiddenFromOtherOwner = await handleRecipes(request('/api/recipes/saved', 'GET', undefined, adminCookie), testEnv);
+    expect(await hiddenFromOtherOwner!.json()).toMatchObject({ recipes: [] });
+    const edited = await handleRecipes(request(`/api/recipes/${recipe.id}`, 'PUT', { ...recipeInput('Edited remembered'), expectedVersion: 1 }, memberCookie), testEnv);
+    expect(edited?.status).toBe(200);
+    const repeat = await handleRequest(request(`/api/recipes/${recipe.id}/repeat`, 'POST', { requestId: crypto.randomUUID() }, memberCookie),
+      testEnv as AuthEnv & { PICNIC_ENCRYPTION_KEY: string; PICNIC_ENCRYPTION_KEY_VERSION: string });
+    expect(repeat.status).toBe(409);
+    expect(await repeat.json()).toMatchObject({ error: { code: 'RECIPE_STALE' } });
+    await db.prepare(`DELETE FROM connections WHERE id=?`).bind(connectionId).run();
+  });
+
+  it('rejects a saved choice whose group set does not cover the current recipe', async () => {
+    const created = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Incomplete remembered'), baseServings: '2',
+      ingredients: [{ section: null, originalText: 'tarwebloem', normalizedName: 'tarwebloem', quantity: { kind: 'exact', amount: '200', unit: 'g' },
+        sourceOrigin: 'user', attributes: {}, uncertainty: [] }] }, memberCookie), testEnv);
+    const recipe = (await created!.json() as { recipe: RecipeDto }).recipe;
+    const response = await handleRecipes(request(`/api/recipes/${recipe.id}/saved-selection`, 'POST', {
+      recipeVersion: recipe.version, servings: '4', choices: [], skippedGroupIds: [],
+    }, memberCookie), testEnv);
+    expect(response?.status).toBe(400);
+    expect(await response!.json()).toMatchObject({ error: { code: 'INVALID_SELECTION' } });
+  });
+
+  it('saves a 101-product selection through bounded D1 catalog lookups', async () => {
+    const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
+    const connectionId = crypto.randomUUID(), now = Date.now();
+    await db.prepare(`INSERT INTO connections(id,owner_id,status,generation,encrypted_resume_key,key_version,created_at,updated_at)
+      VALUES(?,?,'connected',1,'test-ciphertext','test-v1',?,?)`).bind(connectionId, owner!.id, now, now).run();
+    let recipeId: string | null = null;
+    try {
+      const ingredients = Array.from({ length: 101 }, (_, index) => ({ section: null, originalText: 'tarwebloem', normalizedName: 'tarwebloem',
+        quantity: { kind: 'exact', amount: '100', unit: 'g' }, sourceOrigin: 'user', attributes: { brand: `merk-${index}` }, uncertainty: [] }));
+      const created = await handleRecipes(request('/api/recipes', 'POST', { ...recipeInput('Large remembered selection'), baseServings: '2', ingredients }, memberCookie), testEnv);
+      expect(created?.status).toBe(201);
+      const recipe = (await created!.json() as { recipe: RecipeDto }).recipe;
+      recipeId = recipe.id;
+      const groups = shoppingGroups(recipe, '2');
+      expect(groups).toHaveLength(101);
+      const catalogRows = groups.map((group, index) => {
+        const id = `sku-${index}`, brand = `merk-${index}`;
+        const product = { id, name: `Tarwebloem ${brand}`, brand, unitQuantity: '100 g',
+          quantity: { kind: 'exact', amount: '100', unit: 'g', basis: null }, displayPriceCents: 50, priceCertainty: 'known', priceRanges: [],
+          identity: { groupId: id, variantId: id } };
+        return db.prepare(`INSERT INTO catalog_products(owner_id,connection_id,connection_generation,product_id,product_json,content_fingerprint,
+          commercial_fingerprint,source_route,first_seen,checked_at) VALUES(?,?,1,?,?,'content','commercial','test',?,?)`)
+          .bind(owner!.id, connectionId, id, JSON.stringify(product), now, now);
+      });
+      for (let offset = 0; offset < catalogRows.length; offset += 80) await db.batch(catalogRows.slice(offset, offset + 80));
+      const response = await handleRecipes(request(`/api/recipes/${recipe.id}/saved-selection`, 'POST', {
+        recipeVersion: recipe.version, servings: '2', choices: groups.map((group, index) => ({ groupId: group.id,
+          productId: `sku-${index}`, packCount: 1, substitutionAccepted: false })), skippedGroupIds: [],
+      }, memberCookie), testEnv);
+      expect(response?.status).toBe(200);
+      expect((await response!.json() as { savedRecipe: SavedRecipeDto }).savedRecipe.choices).toHaveLength(101);
+    } finally {
+      if (recipeId) await db.prepare(`DELETE FROM recipes WHERE owner_id=? AND id=?`).bind(owner!.id, recipeId).run();
+      await db.prepare(`DELETE FROM connections WHERE id=?`).bind(connectionId).run();
+    }
+  });
+
   it('automatically adopts the same candidate once across concurrent requests and retries after expiry', async () => {
     const owner = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(memberEmail).first<{ id: string }>();
     const importId = await seedImport(owner!.id);

@@ -1,4 +1,5 @@
 import type { ImportCandidate } from '../../shared/imports';
+import { recipeImageUrl } from '../../shared/recipe-image';
 import { formatRational, parseRational } from '../../shared/quantities';
 
 const MAX_CANDIDATES = 30;
@@ -132,6 +133,7 @@ function candidate(node: Record<string, unknown>, sourceUrl: string | null): Imp
     ingredients.some(item => item.originalText.length >= 1000 || (item.section?.length ?? 0) >= 200) || (title?.length ?? 0) >= 300;
   return {
     title, sourceTitle: title, sourceUrl, baseServings,
+    imageUrl: recipeImageUrl(Array.isArray(node.image) ? (typeof node.image[0] === 'object' ? node.image[0]?.url : node.image[0]) : typeof node.image === 'object' && node.image ? (node.image as Record<string, unknown>).url : node.image, sourceUrl),
     sections, ingredients, steps: stepResult.steps,
     uncertainty: [!title ? 'recipe_title_missing' : '', ingredients.length === 0 ? 'ingredients_missing' : '',
       ingredients.length ? 'ingredients_unparsed' : '', ingredients.length ? 'quantity_review_required' : '',

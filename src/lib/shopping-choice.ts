@@ -1,7 +1,8 @@
 import type { ShoppingRow } from '../../shared/shopping';
-export type ShoppingChoiceState = { productId: string | null; selected: boolean; count: number | null; changed: boolean; countChanged?: boolean; remember: boolean; substitutionAccepted: boolean; note?: string };
+export type ShoppingChoiceState = { productId: string | null; selected: boolean; count: number | null; changed: boolean; countChanged?: boolean; omitted?: boolean; remember: boolean; substitutionAccepted: boolean; note?: string };
 /** Rechecking never silently replaces a user's explicit product choice. */
 export function restoreShoppingChoice(row: ShoppingRow, previous?: ShoppingChoiceState): ShoppingChoiceState {
+  if (previous?.omitted) return { productId: null, selected: false, count: null, changed: false, remember: false, substitutionAccepted: false, omitted: true };
   const product = previous && row.candidates.find(item => item.product.id === previous.productId);
   const stillSuitable = product && (product.match === 'suitable' || product.match === 'substitution' && previous.substitutionAccepted);
   if (previous?.productId && (previous.changed || previous.countChanged) && !stillSuitable) {

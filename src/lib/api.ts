@@ -1,5 +1,5 @@
-import type { ShoppingPlan, ShoppingProposalInput, ShoppingProposalResult } from '../../shared/shopping';
-import type { RecipeDto, RecipeIngredientDto, RecipeImportSourceInput } from '../../shared/recipes';
+import type { RepeatSavedRecipeResult, ShoppingPlan, ShoppingProposalInput, ShoppingProposalResult } from '../../shared/shopping';
+import type { RecipeDto, RecipeIngredientDto, RecipeImportSourceInput, SaveRecipeSelectionInput, SavedRecipeDto } from '../../shared/recipes';
 import type { PicnicCart, PicnicConnectResponse, PicnicConnectionDto, PicnicProduct } from '../../shared/picnic';
 import type { ImportDto } from '../../shared/imports';
 import type { ProposalChoiceInput, ProposalDto } from '../../shared/proposals';
@@ -50,9 +50,9 @@ export class ApiError extends Error {
 
 interface ErrorBody { error?: { code?: string; message?: string; fields?: Record<string, string> } }
 
-async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs?: number): Promise<T> {
+async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 30_000): Promise<T> {
   let response: Response;
-  const signal = timeoutMs === undefined ? undefined : AbortSignal.timeout(Math.max(1,Math.ceil(timeoutMs)));
+  const signal = AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)));
   try {
     response = await fetch(path, {
       method, signal,
@@ -73,7 +73,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, timeoutM
   }
   if (response.status === 204) return undefined as T;
   try { return await response.json() as T; }
-  catch { throw new ApiError(0, 'INVALID_RESPONSE', 'De server gaf een onleesbaar antwoord. Probeer het opnieuw.'); }
+  catch { if (signal.aborted) throw new ApiError(504, 'WORKFLOW_TIMEOUT', 'Het antwoord duurde te lang. Je gegevens blijven bewaard; probeer het opnieuw.'); throw new ApiError(0, 'INVALID_RESPONSE', 'De server gaf een onleesbaar antwoord. Probeer het opnieuw.'); }
 }
 
 export const api = {
@@ -97,6 +97,9 @@ export const api = {
   updateRecipe: (id: string, expectedVersion: number, input: RecipeInputDto) => request<{ recipe: RecipeDto }>(`/api/recipes/${encodeURIComponent(id)}`, 'PUT', { ...input, expectedVersion }),
   deleteRecipe: (id: string) => request<void>(`/api/recipes/${encodeURIComponent(id)}`, 'DELETE'),
   deleteRecipeSource: (id: string) => request<void>(`/api/recipes/${encodeURIComponent(id)}/source`, 'DELETE'),
+  saveRecipeSelection: (recipeId: string, input: SaveRecipeSelectionInput) => request<{ savedRecipe: SavedRecipeDto }>(`/api/recipes/${encodeURIComponent(recipeId)}/saved-selection`, 'POST', input),
+  listSavedRecipes: (cursor?: string) => request<{ recipes: SavedRecipeDto[]; nextCursor: string | null }>(`/api/recipes/saved${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`),
+  repeatSavedRecipe: (recipeId: string, requestId: string) => request<RepeatSavedRecipeResult>(`/api/recipes/${encodeURIComponent(recipeId)}/repeat`, 'POST', { requestId }),
   adminOverview: () => request<AdminOverviewDto>('/api/admin/overview'),
   invite: (email: string) => request<{ invitation: { id: string; email: string; status: string; expiresAt: number } }>('/api/admin/invitations', 'POST', { email }),
   revokeInvitation: (id: string) => request<void>(`/api/admin/invitations/${encodeURIComponent(id)}`, 'DELETE'),

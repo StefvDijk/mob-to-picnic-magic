@@ -55,9 +55,8 @@ export function AuthPanel({ onAuthenticated, initialEmail = '', onCancel, reveri
   }
 
   return (
-    <section className="auth-card" aria-labelledby="auth-title">
-      <p className="eyebrow">Jouw eigen kookboek</p>
-      <h1 id="auth-title">{reverify ? 'Bevestig je e-mailadres' : 'Lekker, je bent er.'}</h1>
+    <section className="auth-card" aria-labelledby={reverify ? 'auth-title' : undefined} aria-label={reverify ? undefined : 'Inloggen'}>
+      {reverify && <h1 id="auth-title">Bevestig je e-mailadres</h1>}
       <p className="subtle">{reverify
         ? 'Voor deze handeling vragen we een nieuwe e-mailcode.'
         : 'Log in met je e-mailadres. Je ontvangt een code, dus een wachtwoord onthouden hoeft niet.'}</p>
@@ -83,7 +82,6 @@ export function AuthPanel({ onAuthenticated, initialEmail = '', onCancel, reveri
       )}
       {message && <p className="notice" role="status">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
-      {!reverify && <p className="app-footnote">Mijn recepten is een onafhankelijke testapp met Picnic-koppeling.</p>}
       {onCancel && <Button type="button" variant="outline" onClick={onCancel}>Annuleren</Button>}
     </section>
   );

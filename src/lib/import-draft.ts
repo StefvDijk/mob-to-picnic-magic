@@ -51,13 +51,13 @@ export function importIssueText(code: string): string {
 }
 
 const ERROR_TEXT: Record<string, string> = {
-  IMPORT_URL_REJECTED: 'Deze link wordt niet ondersteund.',
+  IMPORT_URL_REJECTED: 'Gebruik een HTTPS-link naar een openbare website zonder inloggegevens.',
   IMPORT_PAYWALLED: 'Dit recept staat achter een betaalmuur. Gebruik een foto of screenshot van het recept.',
-  IMPORT_REDIRECT_REJECTED: 'De link verwijst door naar een niet-toegestane pagina.',
+  IMPORT_REDIRECT_REJECTED: 'De website stuurde door naar een onveilige of ongeldige link.',
   WORKFLOW_TIMEOUT: 'Er is geen volledig voorstel binnen 30 seconden. Je bron blijft bewaard.',
   IMPORT_TIMEOUT: 'Het ophalen van de pagina duurde te lang.',
   IMPORT_TOO_LARGE: 'De pagina is te groot om te verwerken.',
-  IMPORT_FETCH_FAILED: 'De pagina kon niet worden opgehaald.',
+  IMPORT_FETCH_FAILED: 'De pagina kon niet worden opgehaald. Mogelijk blokkeert de website automatisch ophalen; probeer een foto of screenshot.',
   IMPORT_UNSUPPORTED_CONTENT: 'De link verwijst niet naar een ondersteunde webpagina.',
   IMPORT_FAILED: 'De import kon niet worden verwerkt.',
   UPLOAD_UNSUPPORTED: 'Foto-import is nog niet beschikbaar.',

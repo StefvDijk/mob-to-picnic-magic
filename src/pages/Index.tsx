@@ -1,5 +1,6 @@
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpenText, Settings2, UserRound, ShoppingBasket, ChefHat, ArrowRight, Check } from 'lucide-react';
+import { BookOpenText, UserRound, ShoppingBasket, ChefHat, ArrowRight, Check } from 'lucide-react';
 import { api, ApiError, type MeDto } from '@/lib/api';
 import { AuthPanel } from '@/components/AuthPanel';
 import { AccountPanel } from '@/components/AccountPanel';
@@ -18,7 +19,15 @@ export default function Index() {
   const [me, setMe] = useState<MeDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [section, setSection] = useState<Section>('recipes');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const section: Section = location.pathname === '/picnic' ? 'picnic' : location.pathname === '/account' ? 'account' : location.pathname === '/beheer' ? 'admin' : 'recipes';
+  const setSection = (next: Section) => navigate(next === 'recipes' ? '/' : next === 'admin' ? '/beheer' : `/${next}`);
+  const onAuthExpired = useCallback(() => { setMe(null); setError('Je sessie is verlopen. Log opnieuw in om verder te gaan. Je concept blijft op dit apparaat bewaard.'); }, []);
+  useEffect(() => {
+    document.getElementById('main-content')?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [location.pathname]);
   const lastOwner = useRef<string | null>(null);
 
   const refreshMe = useCallback(async () => {
@@ -71,16 +80,17 @@ export default function Index() {
         <button type="button" aria-current={section === 'recipes' ? 'page' : undefined} onClick={() => setSection('recipes')}><BookOpenText aria-hidden="true" />Recepten</button>
         <button type="button" aria-current={section === 'picnic' ? 'page' : undefined} onClick={() => setSection('picnic')}><ShoppingBasket aria-hidden="true" />Picnic</button>
         <button type="button" aria-current={section === 'account' ? 'page' : undefined} onClick={() => setSection('account')}><UserRound aria-hidden="true" />Account</button>
-        {me.account.role === 'admin' && <button type="button" aria-current={section === 'admin' ? 'page' : undefined} onClick={() => setSection('admin')}><Settings2 aria-hidden="true" />Beheer</button>}
+
       </nav>
       <button className="connection-chip" onClick={() => setSection('picnic')}><span className={me.picnic.status === 'connected' ? 'status-dot connected' : 'status-dot'} />{me.picnic.status === 'connected' ? 'Picnic verbonden' : 'Koppel Picnic'}<ArrowRight size={15} aria-hidden="true" /></button>
     </div></header>
     <div className="app-grid">
       <main id="main-content" className="main-content" tabIndex={-1}>
         {error && <p className="error-message" role="alert">{error}</p>}
-        {section === 'recipes' && <RecipeWorkspace key={me.account.id} me={me} onAuthExpired={() => { setMe(null); setError('Je sessie is verlopen. Log opnieuw in om verder te gaan. Je concept blijft op dit apparaat bewaard.'); }} />}
+        {section === 'recipes' && <RecipeWorkspace key={me.account.id} me={me} onAuthExpired={onAuthExpired} />}
         {section === 'picnic' && <div className="view-stack"><header className="page-heading"><p className="eyebrow">Van recept naar mandje</p><h1>Jouw Picnic</h1><p className="subtle">Verbind je account, zoek producten en bekijk wat er in je mandje zit.</p></header><PicnicPanel me={me} onRefresh={refreshMe} /><p className="app-footnote">Mijn recepten is een onafhankelijke testapp. Bestellen en afrekenen doe je in de Picnic-app.</p></div>}
-        {section === 'account'  && <AccountPanel me={me} onRefresh={refreshMe} onSignedOut={signedOut} />}
+        {section === 'account'  && <AccountPanel me={me} onRefresh={refreshMe} onSignedOut={signedOut} onOpenAdmin={() => setSection('admin')} />}
+        {section === 'admin' && me.account.role !== 'admin' && <p role="alert">Je hebt geen toegang tot beheer.</p>}
         {section === 'admin' && me.account.role === 'admin' && <AdminPanel me={me} onRefreshMe={refreshMe} />}
       </main>
     </div>

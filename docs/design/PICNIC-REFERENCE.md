@@ -21,3 +21,7 @@ De openbare pagina's bevatten geen complete gepubliceerde componentbibliotheek. 
 ## Productvertaling
 
 De app houdt de naam Mijn recepten; een eigen kookicoon in een rood merkvlak onderscheidt hem van de officiële Picnic-app. Desktop gebruikt hoofdnavigatie bovenaan, mobiel onderaan. Picnic is een eigen bestemming voor koppeling, zoeken en bestaand mandje. Account bevat uitsluitend accountbeheer. Recepten zonder eigen foto krijgen een duidelijke illustratieve kaart, geen verzonnen gerechtfoto. Er worden geen niet-beschikbare functies of fictieve recepten getoond.
+
+## Uitgebreid onderzoek en library
+
+Zie [PICNIC-DESIGN-SYSTEM.md](PICNIC-DESIGN-SYSTEM.md) voor het vervolgonderzoek op 9 oktober, de componentinventaris, tokenherkomst, productbeeldroute, interactieve galerij en resterende metingen voor pixelpariteit.

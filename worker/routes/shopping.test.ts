@@ -108,6 +108,16 @@ async function getPlan(fixture = fixtureProvider()): Promise<ShoppingPlan> {
   expect(response?.status).toBe(200);
   return (await response!.json() as { plan: ShoppingPlan }).plan;
 }
+async function rememberForRepeat(plan: ShoppingPlan, choices: Array<{ groupId: string; productId: string; packCount: number; substitutionAccepted?: boolean }>,
+  skippedGroupIds: string[] = []): Promise<void> {
+  const groups = new Map(plan.rows.map(row => [row.id, row]));
+  const snapshot = { servings: plan.servings, choices: choices.map(choice => ({
+    ...choice, groupName: groups.get(choice.groupId)?.name ?? choice.groupId, productName: fixtureProduct.name,
+    substitutionAccepted: choice.substitutionAccepted ?? false,
+  })), skippedGroupIds };
+  await db.prepare(`INSERT INTO saved_recipe_selections(owner_id,recipe_id,recipe_version,snapshot_json,updated_at) VALUES(?,?,?,?,?)`)
+    .bind(ownerId, recipeId, plan.recipeVersion, JSON.stringify(snapshot), Date.now()).run();
+}
 
 it('returns an explicit deadline failure for a stalled search without a partial plan', async () => {
   const provider = fixtureProvider(async () => new Promise(() => {}));
@@ -145,6 +155,95 @@ async function extraIngredient(name: string, ordinal: number, amount: number | n
   return id;
 }
 describe('automatic shopping with real D1 and mocked Picnic', () => {
+  it('repeats exact saved product IDs and pack counts with refreshed prices and stable retries', async () => {
+    const plan = await getPlan();
+    const row = plan.rows[0];
+    await rememberForRepeat(plan, [{ groupId: row.id, productId: fixtureProduct.id, packCount: 5 }]);
+    const fixture = fixtureProvider();
+    fixture.search = vi.fn(async () => [{ ...fixtureProduct, displayPriceCents: 80 }]);
+    const body = { requestId: crypto.randomUUID() };
+    const first = await handleShopping(request(`/api/recipes/${recipeId}/repeat`, 'POST', body), testEnv, { provider: fixture });
+    expect(first?.status).toBe(201);
+    const result = await first!.json() as { proposal: { id: string; totalPriceCents: number }; unavailable: unknown[] };
+    expect(result).toMatchObject({ unavailable: [], proposal: { totalPriceCents: 400 } });
+    expect(await db.prepare(`SELECT pack_count AS packs,price_cents AS price,product_snapshot_json AS snapshot FROM purchase_lines WHERE proposal_id=?`)
+      .bind(result.proposal.id).first<{ packs: number; price: number; snapshot: string }>()).toMatchObject({ packs: 5, price: 80 });
+    const retry = await handleShopping(request(`/api/recipes/${recipeId}/repeat`, 'POST', body), testEnv, { provider: fixture });
+    expect(await retry!.json()).toMatchObject({ proposal: { id: result.proposal.id, totalPriceCents: 400 } });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM proposals WHERE owner_id=? AND recipe_id=?`).bind(ownerId, recipeId).first()).toEqual({ count: 1 });
+  });
+
+  it('merges repeated saved SKU lines while preserving each group count in the proposal snapshot', async () => {
+    const secondIngredientId = await extraIngredient('tarwebloem', 1, 20);
+    await db.prepare(`UPDATE ingredients SET attributes_json='{"quantityBasis":"drained"}' WHERE id=?`).bind(secondIngredientId).run();
+    const plan = await getPlan();
+    expect(plan.rows).toHaveLength(2);
+    await rememberForRepeat(plan, [
+      { groupId: plan.rows[0].id, productId: fixtureProduct.id, packCount: 2 },
+      { groupId: plan.rows[1].id, productId: fixtureProduct.id, packCount: 3 },
+    ]);
+    const response = await handleShopping(request(`/api/recipes/${recipeId}/repeat`, 'POST', { requestId: crypto.randomUUID() }), testEnv,
+      { provider: fixtureProvider() });
+    expect(response?.status).toBe(201);
+    const { proposal } = await response!.json() as { proposal: { id: string; totalPriceCents: number } };
+    const lines = await db.prepare(`SELECT pack_count AS packs,product_snapshot_json AS snapshot FROM purchase_lines WHERE proposal_id=?`)
+      .bind(proposal.id).all<{ packs: number; snapshot: string }>();
+    expect(lines.results).toHaveLength(1);
+    expect(lines.results[0].packs).toBe(5);
+    expect(JSON.parse(lines.results[0].snapshot).decisions.map((choice: { chosenPackCount: number }) => choice.chosenPackCount).sort())
+      .toEqual([2, 3]);
+  });
+
+  it('blocks the full remembered repeat when one exact product is unavailable', async () => {
+    await extraIngredient('rijst', 1, 300);
+    const plan = await getPlan();
+    const flour = plan.rows.find(row => row.name === 'tarwebloem')!;
+    const rice = plan.rows.find(row => row.name === 'rijst')!;
+    const riceProduct: PicnicProduct = { ...fixtureProduct, id: 'rice-sku', name: 'Rijst' };
+    await rememberForRepeat(plan, [{ groupId: flour.id, productId: fixtureProduct.id, packCount: 4 },
+      { groupId: rice.id, productId: riceProduct.id, packCount: 2 }]);
+    const fixture = fixtureProvider();
+    fixture.search = vi.fn(async (_key, query) => query === 'rijst' ? [] : [fixtureProduct]);
+    const response = await handleShopping(request(`/api/recipes/${recipeId}/repeat`, 'POST', { requestId: crypto.randomUUID() }), testEnv, { provider: fixture });
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({ proposal: null, unavailable: [{ groupId: rice.id, reason: 'unverified' }] });
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM proposals WHERE owner_id=? AND recipe_id=?`).bind(ownerId, recipeId).first()).toEqual({ count: 0 });
+  });
+
+  it('does not prepare a partial repeat when a second current check loses an item', async () => {
+    const plan = await getPlan();
+    await rememberForRepeat(plan, [{ groupId: plan.rows[0].id, productId: fixtureProduct.id, packCount: 4 }]);
+    let currentReads = 0;
+    const fixture = fixtureProvider();
+    fixture.search = vi.fn(async () => ++currentReads === 1 ? [fixtureProduct] : []);
+    const response = await handleShopping(request(`/api/recipes/${recipeId}/repeat`, 'POST', { requestId: crypto.randomUUID() }), testEnv, { provider: fixture });
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({ proposal: null, unavailable: [{ reason: 'unverified' }] });
+    expect(currentReads).toBe(2);
+    expect(await db.prepare(`SELECT COUNT(*) AS count FROM proposals WHERE owner_id=? AND recipe_id=?`).bind(ownerId, recipeId).first()).toEqual({ count: 0 });
+  });
+
+  it('repeats explicitly selected pantry products and excludes explicitly skipped groups', async () => {
+    await extraIngredient('zout', 1);
+    const plan = await getPlan();
+    const flour = plan.rows.find(row => row.name === 'tarwebloem')!;
+    const pantry = plan.rows.find(row => row.pantry)!;
+    const salt: PicnicProduct = { ...fixtureProduct, id: 'salt-sku', name: 'Keukenzout' };
+    await rememberForRepeat(plan, [
+      { groupId: flour.id, productId: fixtureProduct.id, packCount: 2 },
+      { groupId: pantry.id, productId: salt.id, packCount: 1 },
+    ]);
+    const fixture = fixtureProvider();
+    fixture.search = vi.fn(async (_key, query) => query === 'keukenzout' ? [salt] : [fixtureProduct]);
+    const response = await handleShopping(request(`/api/recipes/${recipeId}/repeat`, 'POST', { requestId: crypto.randomUUID() }), testEnv,
+      { provider: fixture });
+    expect(response?.status).toBe(201);
+    const { proposal } = await response!.json() as { proposal: { id: string } };
+    const lines = await db.prepare(`SELECT json_extract(product_snapshot_json,'$.id') AS productId,pack_count AS packs
+      FROM purchase_lines WHERE proposal_id=? ORDER BY productId`).bind(proposal.id).all();
+    expect(lines.results).toEqual([{ productId: 'salt-sku', packs: 1 }, { productId: fixtureProduct.id, packs: 2 }]);
+  });
+
   it('automatically finds a plan, preserves unknown/unselected rows and submits only the selected subset', async () => {
     await extraIngredient('zout', 1);
     await extraIngredient('onbekend', 2, null);

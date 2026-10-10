@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import { api, ApiError, type MeDto } from '@/lib/api';
 import type { PicnicCart, PicnicProduct } from '../../shared/picnic';
+import { ProductImage, ProductPrice } from '@/components/picnic/catalog';
 import { AuthPanel } from '@/components/AuthPanel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -230,13 +231,16 @@ export function PicnicPanel({ me, onRefresh }: PicnicPanelProps) {
 
   return (
     <section className="panel picnic-panel" aria-labelledby="picnic-title">
-      <div className="picnic-panel-heading">
-        <div>
-          <h2 id="picnic-title" ref={headingRef} tabIndex={-1}>Picnic-koppeling</h2>
-          <p className="subtle">Status: {connected ? 'verbonden' : me.picnic.verificationRequired ? 'sms-code nodig' : me.picnic.status === 'invalid' ? 'opnieuw koppelen nodig' : 'niet verbonden'}.</p>
+      <div className={`picnic-panel-heading ${connected ? 'picnic-connected-row' : ''}`}>
+        <div className="picnic-connection-status">
+          {connected && <span className="picnic-status-dot" aria-hidden="true"/>}
+          <div>
+            <h2 id="picnic-title" ref={headingRef} tabIndex={-1}>Picnic-koppeling</h2>
+            <p className="subtle">{connected ? 'Verbonden' : me.picnic.verificationRequired ? 'Sms-code nodig' : me.picnic.status === 'invalid' ? 'Opnieuw koppelen nodig' : 'Niet verbonden'}</p>
+          </div>
         </div>
         <div className="action-row">
-          {!me.picnic.verificationRequired && <Button type="button" disabled={pending} onClick={event => { dialogOpener.current = event.currentTarget; resetFlow(); setOpen(true); }}>
+          {!me.picnic.verificationRequired && <Button type="button" variant={connected ? 'ghost' : 'default'} disabled={pending} onClick={event => { dialogOpener.current = event.currentTarget; resetFlow(); setOpen(true); }}>
             {connected ? 'Koppeling vervangen' : 'Picnic koppelen'}
           </Button>}
           {me.picnic.status !== 'disconnected' && (
@@ -314,21 +318,8 @@ export function PicnicPanel({ me, onRefresh }: PicnicPanelProps) {
       </div>}
 
       {connected && <div className="picnic-readonly">
-        <div className="picnic-section-heading"><div><h3>Producten zoeken</h3><p className="subtle">Alleen bekijken; zoeken verandert je Picnic-mandje niet.</p></div></div>
-        <form className="picnic-search" onSubmit={search}>
-          <Label htmlFor={queryId}>Productnaam</Label>
-          <Input id={queryId} value={query} onChange={event => { setQuery(event.target.value); setProducts(null); setSearchError(''); setSearchPending(false); searchRequest.current += 1; }} maxLength={100} required />
-          <Button type="submit" disabled={searchPending || !query.trim()}>{searchPending ? 'Zoeken…' : 'Zoeken'}</Button>
-        </form>
-        {searchError && <p className="error-message" role="alert">{searchError}</p>}
-        {products && (products.length ? <ul className="picnic-product-list">{products.map(product => <li key={product.id}>
-          <strong>{product.name}</strong><span>{formatQuantity(product)}{product.unitQuantity ? ` · Picnic-verpakking: ${product.unitQuantity}` : ''}</span>
-          <span>{product.priceCertainty === 'conditional'
-            ? `Prijs afhankelijk van aantal${product.displayPriceCents != null ? ` · getoonde prijs ${euro(product.displayPriceCents)}` : ' · bedrag onbekend'}`
-            : product.priceCertainty === 'unknown' || product.displayPriceCents == null ? 'Prijs onbekend' : euro(product.displayPriceCents)}</span>
-        </li>)}</ul> : <p className="empty-small" role="status">Geen producten gevonden.</p>)}
-
-        <div className="picnic-section-heading picnic-cart-heading"><div><h3>Picnic-mandje</h3><p className="subtle">Alleen bekijken; er worden geen producten toegevoegd of gewijzigd.</p></div><Button type="button" variant="outline" onClick={() => void loadCart()} disabled={cartPending}>{cartPending ? 'Verversen…' : 'Verversen'}</Button></div>
+        <section className="picnic-cart-section" aria-labelledby="picnic-cart-title">
+        <div className="picnic-section-heading picnic-cart-heading"><div><h3 id="picnic-cart-title">Picnic-mandje</h3><p className="subtle">Je huidige boodschappen in Picnic.</p></div><Button type="button" variant="outline" onClick={() => void loadCart()} disabled={cartPending}>{cartPending ? 'Verversen…' : 'Verversen'}</Button></div>
         {cartError && <p className="error-message" role="alert">{cartError}</p>}
         {cartPending && !cart && <p className="subtle" role="status">Mandje laden…</p>}
         {cart && <>
@@ -336,8 +327,23 @@ export function PicnicPanel({ me, onRefresh }: PicnicPanelProps) {
             <strong>{line.name}</strong><span>{line.quantity == null ? 'Aantal onbekend' : `Aantal: ${line.quantity}`}{line.unitQuantity ? ` · Picnic-verpakking: ${line.unitQuantity}` : ''}</span>
             <span>{line.unitPriceCents == null ? 'Prijs per verpakking onbekend' : `Prijs per verpakking: ${euro(line.unitPriceCents)}`}{line.isAvailable === false ? ' · niet beschikbaar' : line.isAvailable == null ? ' · beschikbaarheid onbekend' : ''}</span>
           </li>)}</ul> : <p className="empty-small">Er zijn geen mandjeregels gevonden.</p>}
-          <p className="subtle picnic-cart-count">Aantal mandjeregels: {cart.lines.length}. Totaalbedrag wordt niet weergegeven.</p>
+          <p className="subtle picnic-cart-count">{cart.lines.length} {cart.lines.length === 1 ? 'product' : 'producten'} in je mandje. Bekijk het volledige totaal in Picnic.</p>
         </>}
+        </section>
+
+        <section className="picnic-search-section" aria-labelledby="picnic-search-title">
+        <div className="picnic-section-heading"><div><h3 id="picnic-search-title">Producten zoeken</h3><p className="subtle">Zoek in het assortiment van je Picnic-account.</p></div></div>
+        <form className="picnic-search" onSubmit={search}>
+          <Label htmlFor={queryId}>Productnaam</Label>
+          <Input id={queryId} value={query} onChange={event => { setQuery(event.target.value); setProducts(null); setSearchError(''); setSearchPending(false); searchRequest.current += 1; }} maxLength={100} required />
+          <Button type="submit" disabled={searchPending || !query.trim()}>{searchPending ? 'Zoeken…' : 'Zoeken'}</Button>
+        </form>
+        {searchError && <p className="error-message" role="alert">{searchError}</p>}
+        {products && (products.length ? <ul className="picnic-product-list">{products.map(product => <li key={product.id}>
+          <ProductImage product={product} /><div><strong>{product.name}</strong><span>{product.unitQuantity || formatQuantity(product)}</span>
+          <ProductPrice product={product} /></div>
+        </li>)}</ul> : <p className="empty-small" role="status">Geen producten gevonden.</p>)}
+        </section>
       </div>}
       {error && !open && <p className="error-message" role="alert">{error}</p>}
       {message && !open && <p className="notice" role="status">{message}</p>}

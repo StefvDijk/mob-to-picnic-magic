@@ -4,12 +4,17 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { bootstrapAdmin } from '../db';
 import { handleAuth, type AuthEnv } from '../auth';
 import { handleImports } from './imports';
-import { processImportTask } from '../imports/processor';
+import { normalizeRuntimeDnsAnswers, processImportTask, type ImportDnsResolver } from '../imports/processor';
 import { dispatchImportOutbox } from '../imports/outbox';
 import { createAiAttempt, processAiAttempt, type AiEnv, type AiProvider } from '../imports/ai';
 import { handleRequest } from '../index';
 
 const db = env.DB;
+const publicDns: ImportDnsResolver = {
+  resolve4: async () => ['93.184.216.34'],
+  resolve6: async () => ['2606:4700:4700::1111'],
+};
+const fetchWithPublicDns = (fetcher: typeof fetch, resolveDns: ImportDnsResolver = publicDns) => ({ fetch: fetcher, resolveDns });
 const testEnv: AuthEnv = {
   DB: db, APP_ORIGIN: 'https://picnic.test', APP_ENV: 'test',
   AUTH_SECRET: 'test-auth-secret-of-at-least-thirty-two-bytes',
@@ -86,11 +91,31 @@ describe('import routes and durable worker', () => {
       .bind(created.id).first()).toMatchObject({ payload: '{}' });
     expect((await handleImports(request(`/api/imports/${created.id}`, 'GET', undefined, secondCookie), testEnv))?.status).toBe(404);
     const page = new Response(`<script type="application/ld+json">${JSON.stringify({ '@type':'Recipe',name:'Tomato soup',recipeIngredient:['2 tomatoes'],recipeInstructions:['Cook the tomatoes.'] })}</script>`, { headers: { 'Content-Type':'text/html' } });
-    expect(await processImportTask(testEnv, created.id, 1, { fetch: async () => page.clone() })).toBe('processed');
+    expect(await processImportTask(testEnv, created.id, 1, fetchWithPublicDns(async () => page.clone()))).toBe('processed');
     expect(await processImportTask(testEnv, created.id, 1)).toBe('already_done');
     const loaded = await handleImports(request(`/api/imports/${created.id}`, 'GET', undefined, firstCookie), testEnv);
     expect((await loaded!.json() as { import: { status: string; sourceUrl: string; candidates: unknown[] } }).import)
       .toMatchObject({ status: 'needs_review', sourceUrl: 'https://culy.nl/recept', candidates: [{ title: 'Tomato soup' }] });
+  });
+
+  it('imports structured recipes from a public publisher domain outside the former list', async () => {
+    const url = 'https://www.familiekookt.nl/recepten/tomatensoep';
+    const finalUrl = 'https://recipes.another-kitchen.com/tomato-soup';
+    const response = await handleImports(request('/api/imports', 'POST', { type: 'url', url }, firstCookie), testEnv);
+    expect(response?.status).toBe(202);
+    const id = (await response!.json() as { import: { id: string } }).import.id;
+    const recipe = { '@type': 'Recipe', name: 'Tomato soup', recipeIngredient: ['2 tomatoes'], recipeInstructions: ['Simmer.'] };
+    const requested: string[] = [];
+    expect(await processImportTask(testEnv, id, 1, fetchWithPublicDns(async input => {
+      requested.push(String(input));
+      return requested.length === 1
+        ? new Response(null, { status: 302, headers: { Location: finalUrl } })
+        : new Response(`<script type="application/ld+json">${JSON.stringify(recipe)}</script>`, { headers: { 'Content-Type': 'text/html' } });
+    }))).toBe('processed');
+    expect(requested).toEqual([url, finalUrl]);
+    const imported = await handleImports(request(`/api/imports/${id}`, 'GET', undefined, firstCookie), testEnv);
+    expect((await imported!.json() as { import: { candidates: Array<{ title: string; sourceUrl: string }> } }).import.candidates[0])
+      .toMatchObject({ title: 'Tomato soup', sourceUrl: finalUrl });
   });
 
   it('automatically normalizes a URL recipe with a metered structured recognition attempt', async () => {
@@ -166,7 +191,7 @@ describe('import routes and durable worker', () => {
 
   it('rejects unsupported uploads and unsafe URLs, and fences account/session races', async () => {
     expect((await handleImports(request('/api/imports', 'POST', { type: 'upload', uploadIds: ['x'] }, firstCookie), testEnv))?.status).toBe(400);
-    for (const url of ['http://culy.nl/x', 'https://user@culy.nl/x', 'https://culy.nl:444/x', 'https://127.0.0.1/x', 'https://evil.test/x']) {
+    for (const url of ['http://culy.nl/x', 'https://user@culy.nl/x', 'https://culy.nl:444/x', 'https://127.0.0.1/x', 'https://localhost/x', 'https://metadata.google.internal/x']) {
       expect((await handleImports(request('/api/imports', 'POST', { type: 'url', url }, firstCookie), testEnv))?.status).toBe(400);
     }
     const account = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(secondEmail).first<{ id: string }>();
@@ -180,14 +205,97 @@ describe('import routes and durable worker', () => {
     await db.prepare(`UPDATE app_accounts SET status='active',updated_at=? WHERE id=?`).bind(Date.now(), account!.id).run();
   });
 
+  it('rejects DNS answers containing private addresses before fetching', async () => {
+    const created = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://recipe-publisher.nl/soup' }, firstCookie), testEnv);
+    const id = (await created!.json() as { import: { id: string } }).import.id;
+    let fetchCalls = 0;
+    await processImportTask(testEnv, id, 1, {
+      resolveDns: {
+        resolve4: async () => normalizeRuntimeDnsAnswers(['recipe-publisher.edgekey.net.', '93.184.216.34', '10.0.0.7'], 4),
+        resolve6: async () => ['2606:4700:4700::1111'],
+      },
+      fetch: async () => { fetchCalls++; return new Response('<p>ignored</p>', { headers: { 'Content-Type': 'text/html' } }); },
+    });
+    expect(fetchCalls).toBe(0);
+    expect(await db.prepare(`SELECT error_code AS errorCode FROM imports WHERE id=?`).bind(id).first())
+      .toMatchObject({ errorCode: 'IMPORT_URL_REJECTED' });
+  });
+
+  it('fails closed when DNS returns only CNAME targets without public address records', async () => {
+    const created = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://recipe-publisher.nl/soup' }, firstCookie), testEnv);
+    const id = (await created!.json() as { import: { id: string } }).import.id;
+    let fetchCalls = 0;
+    await processImportTask(testEnv, id, 1, {
+      resolveDns: {
+        resolve4: async () => normalizeRuntimeDnsAnswers(['recipes.edgekey.net.'], 4),
+        resolve6: async () => normalizeRuntimeDnsAnswers(['recipes.edgekey.net.'], 6),
+      },
+      fetch: async () => { fetchCalls++; return new Response('<p>ignored</p>', { headers: { 'Content-Type': 'text/html' } }); },
+    });
+    expect(fetchCalls).toBe(0);
+    expect(await db.prepare(`SELECT error_code AS errorCode FROM imports WHERE id=?`).bind(id).first())
+      .toMatchObject({ errorCode: 'IMPORT_FETCH_FAILED' });
+  });
+
+  it('rejects DNS answers containing IPv6 documentation addresses', async () => {
+    const created = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://recipe-publisher.nl/pie' }, firstCookie), testEnv);
+    const id = (await created!.json() as { import: { id: string } }).import.id;
+    let fetchCalls = 0;
+    await processImportTask(testEnv, id, 1, {
+      resolveDns: { resolve4: async () => ['93.184.216.34'], resolve6: async () => ['2001:db8::1'] },
+      fetch: async () => { fetchCalls++; return new Response('<p>ignored</p>', { headers: { 'Content-Type': 'text/html' } }); },
+    });
+    expect(fetchCalls).toBe(0);
+    expect(await db.prepare(`SELECT error_code AS errorCode FROM imports WHERE id=?`).bind(id).first())
+      .toMatchObject({ errorCode: 'IMPORT_URL_REJECTED' });
+  });
+
+  it('normalizes the captured AH CNAME chain while preserving address records', async () => {
+    const url = 'https://www.ah.nl/allerhande/recept/R-R1302919/pompoentraybake-met-whipped-gorgonzola';
+    const capturedA = ['www.ah.nl-v1.edgekey.net.', 'e132375.a.akamaiedge.net.', '2.16.6.207', '2.16.6.197'];
+    const capturedAaaa = ['www.ah.nl-v1.edgekey.net.', 'e132375.a.akamaiedge.net.'];
+    expect(normalizeRuntimeDnsAnswers(capturedA, 4)).toEqual(['2.16.6.207', '2.16.6.197']);
+    expect(normalizeRuntimeDnsAnswers(capturedAaaa, 6)).toEqual([]);
+    expect(normalizeRuntimeDnsAnswers([...capturedA, '10.0.0.7'], 4)).toContain('10.0.0.7');
+    expect(() => normalizeRuntimeDnsAnswers(['internal.example.invalid.'], 4)).toThrow('IMPORT_DNS_INVALID');
+    for (const malformed of ['foo.com/path.', 'foo.com?query.', 'foo..com.', '-foo.com.', 'foo-.com.', `${'a'.repeat(64)}.com.`]) {
+      expect(() => normalizeRuntimeDnsAnswers([malformed], 4)).toThrow('IMPORT_DNS_INVALID');
+    }
+    for (const malformed of ['+1.2.3.4', '1e2.2.3.4', ' 1.2.3.4', '256.2.3.4']) {
+      expect(() => normalizeRuntimeDnsAnswers([malformed], 4)).toThrow('IMPORT_DNS_INVALID');
+    }
+    for (const malformed of ['2606:4700::1111]/path?x=', '2606:4700::1111?x', '2606:4700::1111%eth0', '2606:4700::1111 ']) {
+      expect(() => normalizeRuntimeDnsAnswers([malformed], 6)).toThrow('IMPORT_DNS_INVALID');
+    }
+    expect(() => normalizeRuntimeDnsAnswers(['not-an-address'], 4)).toThrow('IMPORT_DNS_INVALID');
+    const created = await handleImports(request('/api/imports', 'POST', { type: 'url', url }, firstCookie), testEnv);
+    const id = (await created!.json() as { import: { id: string } }).import.id;
+    const ahDnsAnswer: ImportDnsResolver = {
+      resolve4: async () => normalizeRuntimeDnsAnswers(capturedA, 4),
+      resolve6: async () => normalizeRuntimeDnsAnswers(capturedAaaa, 6),
+    };
+    const recipe = { '@type': 'Recipe', name: 'Pompoentraybake', recipeIngredient: ['1 pompoen'], recipeInstructions: ['Roast.'] };
+    await processImportTask(testEnv, id, 1, fetchWithPublicDns(async () => new Response(
+      `<script type="application/ld+json">${JSON.stringify(recipe)}</script>`,
+      { headers: { 'Content-Type': 'text/html' } },
+    ), ahDnsAnswer));
+    const row = await db.prepare(`SELECT status,error_code AS errorCode FROM imports WHERE id=?`).bind(id).first<{status:string;errorCode:string|null}>();
+    expect(row).toMatchObject({ status: 'needs_review', errorCode: null });
+  });
+
   it('revalidates redirects, applies byte/time bounds, and dispatches only task IDs', async () => {
     const create = await handleImports(request('/api/imports', 'POST', { type: 'url', url: 'https://culy.nl/recept' }, firstCookie), testEnv);
     const id = (await create!.json() as { import: { id: string } }).import.id;
     let called = 0;
-    expect(await processImportTask(testEnv, id, 1, { fetch: async () => {
+    const privateRedirectHost = 'menu.private-recipe.com';
+    const redirectResolver: ImportDnsResolver = {
+      resolve4: async host => host === privateRedirectHost ? ['93.184.216.34', '192.168.1.20'] : ['93.184.216.34'],
+      resolve6: async () => ['2606:4700:4700::1111'],
+    };
+    expect(await processImportTask(testEnv, id, 1, fetchWithPublicDns(async () => {
       called++;
-      return new Response(null, { status: 302, headers: { Location: 'https://evil.test/redirect' } });
-    } })).toBe('processed');
+      return new Response(null, { status: 302, headers: { Location: `https://${privateRedirectHost}/redirect` } });
+    }, redirectResolver))).toBe('processed');
     expect(called).toBe(1);
     expect(await db.prepare(`SELECT error_code AS errorCode FROM imports WHERE id=?`).bind(id).first()).toMatchObject({ errorCode: 'IMPORT_REDIRECT_REJECTED' });
 
@@ -197,7 +305,7 @@ describe('import routes and durable worker', () => {
     const large = new ReadableStream<Uint8Array>({ start(controller) {
       controller.enqueue(new Uint8Array(2 * 1024 * 1024));
     }, pull(controller) { controller.enqueue(new Uint8Array(1)); }, cancel() { cancelled = true; } });
-    await processImportTask(testEnv, sizeId, 1, { fetch: async () => new Response(large, { headers: { 'Content-Type': 'text/html' } }) });
+    await processImportTask(testEnv, sizeId, 1, fetchWithPublicDns(async () => new Response(large, { headers: { 'Content-Type': 'text/html' } })));
     expect(await db.prepare(`SELECT error_code AS errorCode FROM imports WHERE id=?`).bind(sizeId).first()).toMatchObject({ errorCode: 'IMPORT_TOO_LARGE' });
     expect(cancelled).toBe(true);
 
@@ -205,9 +313,9 @@ describe('import routes and durable worker', () => {
     const timeoutId = (await timeout!.json() as { import: { id: string } }).import.id;
     vi.useFakeTimers();
     try {
-      const task = processImportTask(testEnv, timeoutId, 1, { fetch: async (_url, init) => new Promise((_resolve, reject) => {
+      const task = processImportTask(testEnv, timeoutId, 1, fetchWithPublicDns(async (_url, init) => new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-      }) });
+      })));
       await vi.advanceTimersByTimeAsync(10_001);
       await task;
       expect(await db.prepare(`SELECT error_code AS errorCode FROM imports WHERE id=?`).bind(timeoutId).first())
@@ -232,7 +340,7 @@ describe('import routes and durable worker', () => {
     expect(await dispatchImportOutbox({ DB: db, IMPORT_QUEUE: queueStub }, Date.now() + 1000)).toBe(0);
     expect(queueBodies).toHaveLength(bodyCount);
     expect(queueBodies).toContainEqual({ kind: 'import', taskId: pendingId, version: 1 });
-    expect(await processImportTask(testEnv, pendingId, 1, { fetch: async () => new Response('<p>recipe</p>', { headers: { 'Content-Type':'text/html' } }) })).toBe('processed');
+    expect(await processImportTask(testEnv, pendingId, 1, fetchWithPublicDns(async () => new Response('<p>recipe</p>', { headers: { 'Content-Type':'text/html' } })))).toBe('processed');
 
     const member = await db.prepare(`SELECT id FROM app_accounts WHERE email=?`).bind(secondEmail).first<{id:string}>();
     const createdAt = Date.now();
@@ -248,7 +356,7 @@ describe('import routes and durable worker', () => {
     expect(queueBodies).toHaveLength(beforeRecover + 2);
     expect(await db.prepare(`SELECT status FROM outbox WHERE task_type='import' AND task_id=?`).bind(recoverId).first())
       .toMatchObject({ status: 'sent' });
-    expect(await processImportTask(testEnv, recoverId, 1, { fetch: async () => new Response('<p>recipe</p>', { headers: { 'Content-Type':'text/html' } }) })).toBe('processed');
+    expect(await processImportTask(testEnv, recoverId, 1, fetchWithPublicDns(async () => new Response('<p>recipe</p>', { headers: { 'Content-Type':'text/html' } })))).toBe('processed');
 
     const orphanId = crypto.randomUUID(), orphanCreated = createdAt - 120_000;
     await db.prepare(`INSERT INTO imports(id,owner_id,source_kind,source_text,status,expires_at,created_at,updated_at)
@@ -292,13 +400,13 @@ describe('import routes and durable worker', () => {
     let markStarted!: () => void;
     const firstResponse = new Promise<Response>(resolve => { releaseFirst = resolve; });
     const started = new Promise<void>(resolve => { markStarted = resolve; });
-    const late = processImportTask(testEnv, id, 1, { fetch: async () => { markStarted(); return firstResponse; } });
+    const late = processImportTask(testEnv, id, 1, fetchWithPublicDns(async () => { markStarted(); return firstResponse; }));
     await started;
     await db.prepare(`UPDATE imports SET work_expires_at=0 WHERE id=?`).bind(id).run();
     const htmlFor = (name: string) => new Response(`<script type="application/ld+json">${JSON.stringify({
       '@type': 'Recipe', name, recipeIngredient: [`1 ${name}`],
     })}</script>`, { headers: { 'Content-Type': 'text/html' } });
-    expect(await processImportTask(testEnv, id, 1, { fetch: async () => htmlFor('Winner B') })).toBe('processed');
+    expect(await processImportTask(testEnv, id, 1, fetchWithPublicDns(async () => htmlFor('Winner B')))).toBe('processed');
     releaseFirst(htmlFor('Late Winner A'));
     expect(await late).toBe('busy');
     const stored = await db.prepare(`SELECT result_json AS result FROM imports WHERE id=?`).bind(id).first<{result:string}>();

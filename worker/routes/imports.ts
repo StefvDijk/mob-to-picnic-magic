@@ -81,7 +81,7 @@ async function createImport(request: Request, env: AuthEnv, principal: Principal
   if (remainingMs === 0) return fail(504, 'WORKFLOW_TIMEOUT', 'Je recept kon niet binnen 30 seconden worden verwerkt.');
   const kind = body.type ?? body.sourceKind;
   let sourceKind: 'url' | 'upload';
-  let sourceText: string | null = null;
+  const sourceText: string | null = null;
   let sourceUrl: string | null = null;
   let sourceLabel: string | null = null;
   let uploadIds: string[] = [];
@@ -95,7 +95,7 @@ async function createImport(request: Request, env: AuthEnv, principal: Principal
   } else if (kind === 'url') {
     if (typeof body.url !== 'string' || body.url.length > 2048) return fail(400, 'INVALID_URL', 'Deze HTTPS-link wordt niet ondersteund.');
     const safeUrl = validateImportUrl(body.url);
-    if (!safeUrl) return fail(400, 'INVALID_URL', 'Gebruik een HTTPS-link van Culy of MOB zonder inloggegevens.');
+    if (!safeUrl) return fail(400, 'INVALID_URL', 'Gebruik een HTTPS-link naar een openbare website zonder inloggegevens.');
     sourceKind = 'url'; sourceUrl = safeUrl.toString();
     if (body.sourceLabel !== undefined) {
       if (typeof body.sourceLabel !== 'string' || body.sourceLabel.length > MAX_LABEL) return fail(400, 'INVALID_SOURCE_LABEL', 'Ongeldige bronnaam.');

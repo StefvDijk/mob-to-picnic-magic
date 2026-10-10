@@ -390,6 +390,7 @@ async function runOne(env: AiEnv, row: Attempt, now: number, deps: AiAttemptDepe
     if (!candidate) { await settle(env,row,used,returnedAt,'invalid_output',sendToken); await createRepairAttempt(env,row,returnedAt); return; }
     const full = await env.DB.prepare(`SELECT source_url AS sourceUrl FROM imports WHERE id=? AND owner_id=?`).bind(row.importId,row.ownerId).first<{sourceUrl:string|null}>();
     candidate.sourceUrl = full?.sourceUrl ?? null;
+    if (structuredSource?.imageUrl) candidate.imageUrl = structuredSource.imageUrl;
     await settle(env,row,used,returnedAt,'succeeded',sendToken,candidate);
   } catch {
     const failedAt = (deps.now ?? Date.now)();

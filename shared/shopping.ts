@@ -65,3 +65,8 @@ export interface ShoppingProposalResult {
   proposal: { id: string; version: number; totalPriceCents: number };
   unavailable: Array<{ groupId: string; name: string; reason?: 'unverified' | 'unavailable' }>;
 }
+
+export interface RepeatSavedRecipeResult {
+  proposal: ShoppingProposalResult['proposal'] | null;
+  unavailable: Array<{ groupId: string; name: string; reason: 'unverified' | 'unavailable' }>;
+}

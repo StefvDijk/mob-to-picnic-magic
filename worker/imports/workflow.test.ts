@@ -1,13 +1,18 @@
 import { env } from 'cloudflare:workers';
 import { applyD1Migrations } from 'cloudflare:test';
 import { beforeAll, expect, it, vi } from 'vitest';
-import { processImportTask } from './processor';
+import { processImportTask, type ImportDnsResolver } from './processor';
 import { processAiAttempt, type AiProvider } from './ai';
 import { WorkflowTimeoutError, beforeDeadline } from './deadline';
 import type { ImportCandidate } from '../../shared/imports';
 
 beforeAll(async () => { await applyD1Migrations(env.DB,env.TEST_MIGRATIONS); });
 const priceUntil=new Date(Date.now()+86400_000).toISOString();
+const publicDns: ImportDnsResolver = {
+  resolve4: async () => ['93.184.216.34'],
+  resolve6: async () => ['2606:4700:4700::1111'],
+};
+const fetchWithPublicDns = (fetcher: typeof fetch) => ({ fetch: fetcher, resolveDns: publicDns });
 const aiEnv = () => ({...env,OPENAI_API_KEY:'mock-only',
   AI_PRICE_ATTESTATION:'gpt-6-luna-standard-2026-10-08+model-prices-verified',
   AI_PRICE_VALID_UNTIL:priceUntil,AI_EUR_PER_USD_BPS:'15000'});
@@ -34,7 +39,7 @@ async function result(id:string) {
 }
 it('completes an exact structured recipe without token counting or model attempts',async () => {
   const {id}=await fixture();
-  expect(await processImportTask(aiEnv(),id,1,{fetch:async()=>page(['200 g rijst','1 ui'])})).toBe('processed');
+  expect(await processImportTask(aiEnv(),id,1,fetchWithPublicDns(async()=>page(['200 g rijst','1 ui'])))).toBe('processed');
   const candidates=JSON.parse(await result(id)) as ImportCandidate[];
   expect(candidates[0]).toMatchObject({baseServings:'4',steps:['Kook de soep.']});
   expect(candidates[0].ingredients[0]).toMatchObject({sourceOrigin:'parser',quantity:{kind:'exact',amount:'200',unit:'g'}});
@@ -43,18 +48,18 @@ it('completes an exact structured recipe without token counting or model attempt
 it('preserves distinct recipe choices in the fast route',async () => {
   const {id}=await fixture();
   const html=await page(['200 g rijst']).text()+await page(['1 ui'],'Offline uien').text();
-  await processImportTask(aiEnv(),id,1,{fetch:async()=>new Response(html,{headers:{'Content-Type':'text/html'}})});
+  await processImportTask(aiEnv(),id,1,fetchWithPublicDns(async()=>new Response(html,{headers:{'Content-Type':'text/html'}})));
   expect(JSON.parse(await result(id)).map((x:ImportCandidate)=>x.title)).toEqual(['Offline soep','Offline uien']);
 });
 it('rejects a late queue delivery before fetching or paying',async () => {
   const {id}=await fixture(Date.now()+8_000), fetcher=vi.fn(async()=>page(['200 g rijst']));
-  await processImportTask(aiEnv(),id,1,{fetch:fetcher});
+  await processImportTask(aiEnv(),id,1,fetchWithPublicDns(fetcher));
   expect(fetcher).not.toHaveBeenCalled();
   expect(await env.DB.prepare('SELECT status,error_code FROM imports WHERE id=?').bind(id).first()).toEqual({status:'failed',error_code:'WORKFLOW_TIMEOUT'});
 });
 async function ambiguous() {
   const current=await fixture();
-  await processImportTask(aiEnv(),current.id,1,{fetch:async()=>page(['20 g sumak'])});
+  await processImportTask(aiEnv(),current.id,1,fetchWithPublicDns(async()=>page(['20 g sumak'])));
   const attempt=(await env.DB.prepare('SELECT id FROM ai_attempts WHERE import_id=?').bind(current.id).first<string>('id'))!;
   return {...current,attempt};
 }

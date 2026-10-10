@@ -64,15 +64,18 @@ function rawDemand(ingredient: RecipeIngredientDto, profile?: IngredientKnowledg
   if (original) return { quantity: original, estimates: ingredient.quantity.kind === 'range' ? ['Berekend met de bovengrens van het recept.'] : [] };
   const line = normalizeIngredient(ingredient.originalText);
   const spoon = sourceSpoon(ingredient.originalText);
-  if (spoon && profile) {
-    const amount = spoon.amount;
-    const isTeaspoon = spoon.unit === 'tsp';
-    const grams = profile.tablespoonGrams;
-    const factor = profile.liquid ? { numerator: isTeaspoon ? 5 : 15, denominator: 1 }
-      : grams ? { numerator: grams, denominator: isTeaspoon ? 3 : 1 } : null;
-    const converted = amount && factor && multiplyRationals(amount, factor);
-    if (converted) return { quantity: { kind: 'exact', amount: formatRational(converted), unit: profile.liquid ? 'ml' : 'g', basis: ['green-olives', 'capers'].includes(profile.key) ? 'drained' : 'net' },
-      estimates: [profile.liquid ? 'Rekenmaat: eetlepel 15 ml, theelepel 5 ml.' : `Geschat: eetlepel ${profile.name} ≈ ${grams} g.`] };
+  if (spoon) {
+    if (profile) {
+      const amount = spoon.amount;
+      const isTeaspoon = spoon.unit === 'tsp';
+      const grams = profile.tablespoonGrams;
+      const factor = profile.liquid ? { numerator: isTeaspoon ? 5 : 15, denominator: 1 }
+        : grams ? { numerator: grams, denominator: isTeaspoon ? 3 : 1 } : null;
+      const converted = amount && factor && multiplyRationals(amount, factor);
+      if (converted) return { quantity: { kind: 'exact', amount: formatRational(converted), unit: profile.liquid ? 'ml' : 'g', basis: ['green-olives', 'capers'].includes(profile.key) ? 'drained' : 'net' },
+        estimates: [profile.liquid ? 'Rekenmaat: eetlepel 15 ml, theelepel 5 ml.' : `Geschat: eetlepel ${profile.name} ≈ ${grams} g.`] };
+    }
+    return { quantity: null, estimates: ['Lepelmaat uit het recept kan niet betrouwbaar naar gram of milliliter worden omgerekend. Kies zelf een verpakkingsaantal.'] };
   }
   if (profile?.handfulGrams && /hand(?:je|vol)/.test(line)) {
     const count = line.match(/^(\d+)\s*hand/)?.[1] ?? '1';
@@ -99,6 +102,7 @@ export function shoppingGroups(recipe: RecipeDto, servings: string): ShoppingGro
       const knowledgeKey = [profile?.key ?? `unverified:${normalizeIngredient(ingredient.normalizedName ?? ingredient.originalText)}`, ...flags].join('|');
       const id = `${knowledgeKey}|${ingredient.quantity.basis ?? 'net'}`;
       const raw = rawDemand(ingredient, profile);
+      const name = profile?.key === 'oregano-fresh' && flags.includes('gedroogd') ? 'gedroogde oregano' : profile?.name ?? ingredient.normalizedName ?? ingredient.originalText;
       let demand = raw.quantity;
       if (demand) {
         const value = scaleExactQuantity(parseRational(demand.amount)!, requested, base);
@@ -120,8 +124,8 @@ export function shoppingGroups(recipe: RecipeDto, servings: string): ShoppingGro
           const sum = add(parseRational(existing.demand.amount)!, parseRational(demand.amount)!);
           existing.demand = sum ? { ...demand, amount: formatRational(sum) } : null;
         } else existing.demand = null;
-      } else groups.set(id, { id, knowledgeKey, name: profile?.name ?? ingredient.normalizedName ?? ingredient.originalText,
-        query: profile?.name ?? (ingredient.normalizedName ?? ingredient.originalText).slice(0, 100), pantry: profile?.pantry ?? false,
+      } else groups.set(id, { id, knowledgeKey, name,
+        query: profile?.key === 'oregano-fresh' && flags.includes('gedroogd') ? name : profile?.name ?? (ingredient.normalizedName ?? ingredient.originalText).slice(0, 100), pantry: profile?.pantry ?? false,
         sources: [split ? {...source, attributes: {}} : source], demand, estimates: raw.estimates });
     }
   }

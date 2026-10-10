@@ -145,6 +145,32 @@ it('still enforces dried form extracted from compound preparation text', () => {
   expect(assessProduct(group, product('dry', 'Gedroogde oregano')).status).toBe('suitable');
 });
 
+it('keeps dried oregano as the requested product and does not replace an unconvertible teaspoon with a garnish estimate', () => {
+  const source = ingredient('oregano', '1', 'g', { originalText: '1 tl gedroogde oregano', quantity: { kind: 'unknown' } });
+  const [group] = shoppingGroups(recipe([source]), '4');
+  expect(group.knowledgeKey).toBe('oregano-fresh|gedroogd');
+  expect(group.id).toBe('oregano-fresh|gedroogd|net');
+  expect(group.name).toBe('gedroogde oregano');
+  expect(group.query).toBe('gedroogde oregano');
+  expect(group.demand).toBeNull();
+  expect(group.sources[0].originalText).toBe('1 tl gedroogde oregano');
+  expect(group.estimates.join(' ')).toContain('Lepelmaat');
+});
+
+it('keeps hand estimates and true unknown garnish estimates when no source spoon conversion is needed', () => {
+  const handful = shoppingGroups(recipe([ingredient('gedroogde abrikozen', '1', 'g', {
+    originalText: '1 handje gedroogde abrikozen', quantity: { kind: 'unknown' },
+  })]), '4')[0];
+  expect(handful.demand).toMatchObject({ amount: '40', unit: 'g' });
+  expect(handful.estimates.join(' ')).toContain('een handje');
+
+  const garnish = shoppingGroups(recipe([ingredient('oregano', '1', 'g', {
+    originalText: 'oregano', quantity: { kind: 'unknown' },
+  })]), '4')[0];
+  expect(garnish.demand).toMatchObject({ amount: '5', unit: 'g' });
+  expect(garnish.estimates.join(' ')).toContain('startschatting');
+});
+
 it('does not transfer pepper variant attributes to salt when splitting the original source', () => {
   const source=ingredient('zout en peper','1','g',{originalText:'Zout en zwarte peper',attributes:{variant:'zwarte peper'}});
   const groups=shoppingGroups(recipe([source]),'4');

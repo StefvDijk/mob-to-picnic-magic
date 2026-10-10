@@ -33,6 +33,7 @@ export interface RecipeUploadDto {
 }
 
 export interface RecipeDto {
+  imageUrl?: string | null;
   id: string;
   title: string;
   sourceLabel: string | null;
@@ -46,4 +47,34 @@ export interface RecipeDto {
   sourceSnapshot?: RecipeSourceSnapshotDto | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** An explicitly saved, exact Picnic selection for one version of a recipe. */
+export interface SavedRecipeDto {
+  recipeId: string;
+  recipeTitle: string;
+  recipeVersion: number;
+  servings: string;
+  choices: Array<{
+    groupId: string;
+    groupName: string;
+    productId: string;
+    productName: string;
+    packCount: number;
+    substitutionAccepted: boolean;
+  }>;
+  skippedGroupIds: string[];
+  updatedAt: number;
+}
+
+export interface SaveRecipeSelectionInput {
+  recipeVersion: number;
+  servings: string;
+  choices: Array<{
+    groupId: string;
+    productId: string;
+    packCount: number;
+    substitutionAccepted: boolean;
+  }>;
+  skippedGroupIds: string[];
 }

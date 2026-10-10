@@ -10,9 +10,10 @@ interface AccountPanelProps {
   me: MeDto;
   onRefresh: () => Promise<void>;
   onSignedOut: () => void;
+  onOpenAdmin: () => void;
 }
 
-export function AccountPanel({ me, onRefresh, onSignedOut }: AccountPanelProps) {
+export function AccountPanel({ me, onRefresh, onSignedOut, onOpenAdmin }: AccountPanelProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -43,45 +44,35 @@ export function AccountPanel({ me, onRefresh, onSignedOut }: AccountPanelProps) 
     onAuthenticated={async () => { await onRefresh(); setReverify(false); setMessage('E-mailadres bevestigd. Kies de handeling opnieuw.'); }} />;
 
   return (
-    <div className="view-stack">
-      <div className="page-heading">
-        <p className="eyebrow">Jouw gegevens</p>
-        <h1>Account</h1>
-        <p className="subtle">Je recepten horen bij <strong>{me.account.email}</strong>.</p>
-      </div>
-
-      <section className="panel" aria-labelledby="session-title">
-        <h2 id="session-title">Ingelogde apparaten</h2>
-        <p className="subtle">Je sessie verloopt uiterlijk op {new Date(me.session.expiresAt).toLocaleDateString('nl-NL')}.</p>
-        <div className="action-row">
-          <Button variant="outline" disabled={pending} onClick={() => run(async () => { await api.logout(); onSignedOut(); })}>Uitloggen op dit apparaat</Button>
-          <Button variant="outline" disabled={pending} onClick={() => run(async () => { await api.logoutAll(); onSignedOut(); })}>Uitloggen op alle apparaten</Button>
-        </div>
+    <div className="view-stack account-compact">
+      <section className="account-group" aria-label="Accountgegevens">
+        <div className="account-row account-email"><span>E-mailadres</span><strong>{me.account.email}</strong></div>
+        <div className="account-row"><span>Sessie</span><Button variant="ghost" disabled={pending} onClick={() => run(async () => { await api.logout(); onSignedOut(); })}>Uitloggen</Button></div>
+        <div className="account-row"><span>Alle apparaten</span><Button variant="ghost" disabled={pending} onClick={() => run(async () => { await api.logoutAll(); onSignedOut(); })}>Overal uitloggen</Button></div>
+        {me.account.role === 'admin' && <div className="account-row"><span>Beheer</span><Button variant="ghost" onClick={onOpenAdmin}>Openen</Button></div>}
       </section>
-
-
-
-      <section className="panel danger-panel" aria-labelledby="delete-title">
-        <h2 id="delete-title">Account verwijderen</h2>
-        <p>Je toegang stopt direct. De app start daarna het verwijderen van je recepten en persoonlijke gegevens. Dit verwijdert je Picnic-account of bestaande boodschappen niet.</p>
-        <AlertDialog onOpenChange={open => { if (!open) setConfirm(''); }}>
-          <AlertDialogTrigger asChild><Button variant="destructive" disabled={pending}>Account verwijderen</Button></AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Account en recepten verwijderen?</AlertDialogTitle>
-              <AlertDialogDescription>Je toegang stopt direct. Het verwijderen van je gegevens wordt daarna uitgevoerd. Je Picnic-account en boodschappen blijven bestaan.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <Label htmlFor="delete-confirm">Typ VERWIJDER ACCOUNT om te bevestigen</Label>
-            <Input id="delete-confirm" autoComplete="off" value={confirm} onChange={event => setConfirm(event.target.value)} />
-            <AlertDialogFooter>
-              <AlertDialogCancel>Annuleren</AlertDialogCancel>
-              <AlertDialogAction disabled={confirm !== 'VERWIJDER ACCOUNT' || pending}
-                onClick={() => { void run(async () => { await api.deleteAccount(); onSignedOut(); }); }}>
-                {pending ? 'Verwijderen…' : 'Verwijderen starten'}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+      <section className="account-group account-danger" aria-label="Account verwijderen">
+        <div className="account-row">
+          <span>Account verwijderen</span>
+          <AlertDialog onOpenChange={open => { if (!open) setConfirm(''); }}>
+            <AlertDialogTrigger asChild><Button variant="ghost" disabled={pending}>Verwijderen</Button></AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Account en recepten verwijderen?</AlertDialogTitle>
+                <AlertDialogDescription>Je toegang stopt direct. De app start daarna het verwijderen van je recepten en persoonlijke gegevens. Je Picnic-account en boodschappen blijven bestaan.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <Label htmlFor="delete-confirm">Typ VERWIJDER ACCOUNT om te bevestigen</Label>
+              <Input id="delete-confirm" autoComplete="off" value={confirm} onChange={event => setConfirm(event.target.value)} />
+              <AlertDialogFooter>
+                <AlertDialogCancel>Annuleren</AlertDialogCancel>
+                <AlertDialogAction disabled={confirm !== 'VERWIJDER ACCOUNT' || pending}
+                  onClick={() => { void run(async () => { await api.deleteAccount(); onSignedOut(); }); }}>
+                  {pending ? 'Verwijderen…' : 'Verwijderen starten'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </section>
       {error && <p className="error-message" role="alert">{error}</p>}
       {message && <p className="notice" role="status">{message}</p>}

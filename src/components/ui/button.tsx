@@ -15,7 +15,7 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        picnic: "bg-gradient-primary text-white shadow-recipe hover:shadow-lg hover:scale-105 transition-all duration-300",
+        picnic: "bg-primary text-primary-foreground hover:bg-primary/90",
         "picnic-outline": "border-2 border-picnic-orange text-picnic-orange bg-transparent hover:bg-picnic-orange hover:text-white transition-all duration-300",
         ingredient: "bg-picnic-light-green text-picnic-green border border-picnic-green/20 hover:bg-picnic-green hover:text-white transition-all duration-200",
       },
@@ -42,7 +42,7 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    return <Comp data-ui="button" data-variant={variant ?? 'default'} className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
   },
 );
 Button.displayName = "Button";

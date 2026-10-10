@@ -1,10 +1,11 @@
+import { ShoppingLoader } from './ShoppingLoader';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import type { ActionDto, ExecutionLineState } from '../../shared/actions';
 import { Button } from '@/components/ui/button';
 
 const labels: Record<ExecutionLineState, string> = { unsent: 'Nog niet verstuurd', sending: 'Wordt toegevoegd', added: 'Toegevoegd', not_added: 'Niet toegevoegd', unknown: 'Uitkomst onbekend', skipped: 'Niet verstuurd' };
-export function AdditionStatus({ id, onAuthExpired, onNewProposal }: { id: string; onAuthExpired: () => void; onNewProposal: () => void }) {
+export function AdditionStatus({ id, onAuthExpired, onNewProposal, shoppingOnly = false }: { id: string; onAuthExpired: () => void; onNewProposal: () => void; shoppingOnly?: boolean }) {
   const [action, setAction] = useState<ActionDto | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,7 +37,8 @@ export function AdditionStatus({ id, onAuthExpired, onNewProposal }: { id: strin
   return <section className="panel" aria-labelledby="addition-status-heading">
     <h3 id="addition-status-heading">Naar je Picnic-mand</h3>
     {error && <p role="alert">{error}</p>}
-    {!action && !error && <p role="status">Status ophalen…</p>}
+    {!action && !error && (shoppingOnly ? <ShoppingLoader message="Status ophalen…"/> : <p role="status">Status ophalen…</p>)}
+    {shoppingOnly && action && ['queued','running'].includes(action.state) && <ShoppingLoader/>}
     {action && <>
       <p role="status">{action.state === 'succeeded' ? 'De producten zijn toegevoegd aan je Picnic-mand.' : action.state === 'queued' || action.state === 'running' ? 'Je boodschappen worden verwerkt.' : 'Controleer hieronder welke producten zijn toegevoegd.'}</p>
       <ul className="ingredient-list">{action.lines.map(line => <li key={line.id}>
@@ -48,7 +50,7 @@ export function AdditionStatus({ id, onAuthExpired, onNewProposal }: { id: strin
         </div>}
       </li>)}</ul>
       <p className="subtle">Er is niets besteld of afgerekend. Je rondt een bestelling zelf af in Picnic.</p>
-      {['succeeded', 'resolved', 'partial', 'stopped'].includes(action.state) && <Button variant="outline" onClick={onNewProposal}>Nieuw voorstel voor een volgende aankoop</Button>}
+      {['succeeded', 'resolved', 'partial', 'stopped'].includes(action.state) && <Button variant="outline" onClick={onNewProposal}>{shoppingOnly ? 'Boodschappen voor de volgende keer' : 'Nieuw voorstel voor een volgende aankoop'}</Button>}
     </>}
     <Button variant="outline" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Status vernieuwen</Button>
   </section>;

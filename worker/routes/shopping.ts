@@ -10,6 +10,7 @@ import { KNOWLEDGE_VERSION, INGREDIENTS, normalizeIngredient } from '../../share
 import { formatRational, parseRational } from '../../shared/quantities';
 import type { PicnicProduct, PicnicProductDetails } from '../../shared/picnic';
 import type { ShoppingChoice, ShoppingPlan, ShoppingProposalInput, ShoppingProposalResult } from '../../shared/shopping';
+import type { SavedRecipeDto } from '../../shared/recipes';
 import { sessionExpiryMillisSql } from '../db';
 import { findCatalogProducts, storeCatalogProducts, productFingerprints } from '../catalog/index';
 import { PRODUCT_KNOWLEDGE_VERSION } from '../catalog/knowledge';
@@ -203,10 +204,11 @@ function parseSelection(body: Record<string, unknown>): ShoppingProposalInput | 
   if (new Set(choices.map(item => item.groupId)).size !== choices.length) return null;
   return { requestId: body.requestId, recipeId: body.recipeId, recipeVersion: Number(body.recipeVersion), servings: body.servings, choices };
 }
-async function prepare(env: ShoppingEnv, principal: Principal, body: Record<string, unknown>, deps: ShoppingDependencies): Promise<Response> {
+async function prepare(env: ShoppingEnv, principal: Principal, body: Record<string, unknown>, deps: ShoppingDependencies,
+  options: { allOrNothing?: boolean; fingerprint?: string } = {}): Promise<Response> {
   const input = parseSelection(body);
   if (!input) return fail(400, 'INVALID_SELECTION', 'Controleer je selectie en verpakkingsaantallen.');
-  const fingerprint = JSON.stringify({ ...input, choices: [...input.choices].sort((a, b) => a.groupId.localeCompare(b.groupId)) });
+  const fingerprint = options.fingerprint ?? JSON.stringify({ ...input, choices: [...input.choices].sort((a, b) => a.groupId.localeCompare(b.groupId)) });
   const replay = async (): Promise<Response | null> => {
     const saved = await env.DB.prepare(`SELECT fingerprint,result_json AS result FROM shopping_requests WHERE owner_id=? AND request_id=?`)
       .bind(principal.ownerId, input.requestId).first<{ fingerprint: string; result: string }>();
@@ -248,6 +250,11 @@ async function prepare(env: ShoppingEnv, principal: Principal, body: Record<stri
     if (choice.remember && candidate.match !== 'suitable') return fail(422, 'PREFERENCE_NOT_SUITABLE', 'Alleen een passende keuze kan worden onthouden.');
   }
   const available = checked.filter((item): item is typeof item & { product: PicnicProduct } => !!item.product);
+  if (options.allOrNothing && available.length !== checked.length) {
+    return json({ proposal: null, unavailable: checked.filter(item => !item.product).map(item => ({
+      groupId: item.group.id, name: item.group.name, reason: item.source === 'unverified' ? 'unverified' as const : 'unavailable' as const,
+    })) });
+  }
   if (!available.length && checked.some(item => item.source === 'unverified')) return fail(503, 'PRODUCT_CHECK_INCOMPLETE', 'De actuele producten konden niet worden bevestigd. Er is niets verstuurd.');
   if (!available.length) return fail(422, 'NO_PRODUCTS_AVAILABLE', 'Geen geselecteerd product is nog beschikbaar. Er is niets verstuurd.');
   // One purchase/send per SKU; sources and count decisions remain explicit in the snapshot.
@@ -296,8 +303,114 @@ async function prepare(env: ShoppingEnv, principal: Principal, body: Record<stri
   catch { return await replay() ?? fail(409, 'PROPOSAL_STALE', 'Recept, koppeling of sessie is gewijzigd. Haal de boodschappen opnieuw op.'); }
   return json(result, 201);
 }
+
+async function repeatSavedRecipe(request: Request, env: ShoppingEnv, principal: Principal, recipeId: string,
+  deps: ShoppingDependencies): Promise<Response> {
+  let body: unknown;
+  try { body = await request.json(); } catch { return fail(400, 'INVALID_BODY', 'Verstuur geldige JSON.'); }
+  if (!body || typeof body !== 'object' || Array.isArray(body) || typeof (body as Record<string, unknown>).requestId !== 'string' ||
+      !/^[a-zA-Z0-9-]{16,100}$/.test((body as Record<string, string>).requestId)) return fail(400, 'INVALID_REQUEST', 'Ongeldige herhaalverzoek.');
+  const requestId = (body as Record<string, string>).requestId;
+  const recipe = await loadRecipe(env, principal.ownerId, recipeId);
+  if (!recipe) return fail(404, 'NOT_FOUND', 'Niet gevonden.');
+  const row = await env.DB.prepare(`SELECT s.recipe_version AS recipeVersion,s.snapshot_json AS snapshotJson
+    FROM saved_recipe_selections s JOIN recipes r ON r.owner_id=s.owner_id AND r.id=s.recipe_id
+    WHERE s.owner_id=? AND s.recipe_id=? AND r.deleted_at IS NULL`).bind(principal.ownerId, recipeId)
+    .first<{ recipeVersion: number; snapshotJson: string }>();
+  if (!row) return fail(404, 'SAVED_RECIPE_NOT_FOUND', 'Er is geen boodschappenkeuze voor dit recept bewaard.');
+  let snapshot: { servings: string; choices: SavedRecipeDto['choices']; skippedGroupIds: string[] };
+  try {
+    const parsed: unknown = JSON.parse(row.snapshotJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid snapshot');
+    const value = parsed as Record<string, unknown>;
+    if (!validServings(value.servings) || !Array.isArray(value.choices) || !Array.isArray(value.skippedGroupIds)) throw new Error('invalid snapshot');
+    const choices = value.choices.filter((entry): entry is SavedRecipeDto['choices'][number] => !!entry && typeof entry === 'object' &&
+      typeof (entry as SavedRecipeDto['choices'][number]).groupId === 'string' &&
+      typeof (entry as SavedRecipeDto['choices'][number]).productId === 'string' &&
+      Number.isSafeInteger((entry as SavedRecipeDto['choices'][number]).packCount) &&
+      (entry as SavedRecipeDto['choices'][number]).packCount > 0 && (entry as SavedRecipeDto['choices'][number]).packCount <= 10_000 &&
+      typeof (entry as SavedRecipeDto['choices'][number]).substitutionAccepted === 'boolean');
+    if (choices.length !== value.choices.length || !value.skippedGroupIds.every((groupId): groupId is string => typeof groupId === 'string')) throw new Error('invalid snapshot');
+    snapshot = { servings: value.servings, choices, skippedGroupIds: value.skippedGroupIds };
+  } catch { return fail(503, 'SAVED_RECIPE_INVALID', 'De bewaarde boodschappenkeuze kan niet worden gelezen.'); }
+  // This fingerprint intentionally excludes refreshed prices and assessments. A retry
+  // with the same request ID returns the original proposal instead of creating another.
+  const fingerprint = JSON.stringify({ recipeId, recipeVersion: row.recipeVersion, servings: snapshot.servings,
+    choices: [...snapshot.choices].map(choice => ({ groupId: choice.groupId, productId: choice.productId,
+      packCount: choice.packCount, substitutionAccepted: choice.substitutionAccepted })).sort((a, b) => a.groupId.localeCompare(b.groupId)),
+    skippedGroupIds: [...snapshot.skippedGroupIds].sort() });
+  const prior = await env.DB.prepare(`SELECT fingerprint,result_json AS result FROM shopping_requests WHERE owner_id=? AND request_id=?`)
+    .bind(principal.ownerId, requestId).first<{ fingerprint: string; result: string }>();
+  if (prior) return prior.fingerprint === fingerprint ? json(JSON.parse(prior.result))
+    : fail(409, 'SELECTION_CONFLICT', 'Deze herhaling hoort bij een andere bewaarde selectie.');
+  if (row.recipeVersion !== recipe.version) return fail(409, 'RECIPE_STALE', 'Het recept is gewijzigd. Bewaar je productkeuzes opnieuw.');
+  let groups;
+  try { groups = shoppingGroups(recipe, snapshot.servings); }
+  catch { return fail(409, 'RECIPE_STALE', 'De bewaarde porties passen niet meer bij dit recept.'); }
+  const groupIds = new Set(groups.map(group => group.id));
+  const selectedIds = snapshot.choices.map(choice => choice.groupId);
+  const allIds = new Set([...selectedIds, ...snapshot.skippedGroupIds]);
+  if (new Set(selectedIds).size !== selectedIds.length || allIds.size !== groupIds.size ||
+      [...groupIds].some(groupId => !allIds.has(groupId)) || [...allIds].some(groupId => !groupIds.has(groupId))) {
+    return fail(409, 'RECIPE_STALE', 'De bewaarde keuzes passen niet meer bij dit recept. Bewaar ze opnieuw.');
+  }
+  if (!snapshot.choices.length) return json({ proposal: null, unavailable: [] });
+  const link = await connection(env, principal.ownerId);
+  if (!link) return fail(409, 'PICNIC_NOT_CONNECTED', 'Koppel eerst je Picnic-account.');
+  const authKey = await decryptCredential(env, principal.ownerId, link.id, 'resume', link.keyVersion, link.encryptedResumeKey);
+  const api = deps.provider ?? createAbortablePicnicProvider();
+  type RepeatCheck = { choice: SavedRecipeDto['choices'][number]; expectedPriceCents: number; assessmentId?: string } |
+    { groupId: string; name: string; reason: 'unverified' | 'unavailable' } |
+    { groupId: string; name: string; review: 'MATCH_NOT_CONFIRMED' | 'SUBSTITUTION_NOT_ACCEPTED' | 'PRICE_UNAVAILABLE' };
+  const issues = await mapLimited<SavedRecipeDto['choices'][number], RepeatCheck>(snapshot.choices, async choice => {
+    const group = groups.find(item => item.id === choice.groupId)!;
+    try {
+      const current = await checkCurrentProduct(api, authKey, choice.productId, group.query);
+      if (!current.product || current.product.isAvailable === false) return {
+        groupId: group.id, name: group.name, reason: current.product?.isAvailable === false ? 'unavailable' as const : 'unverified' as const,
+      };
+      if (await live(env, principal, link)) await storeCatalogProducts(env.DB,
+        { ownerId: principal.ownerId, connectionId: link.id, generation: link.generation }, [current.product], Date.now(), current.source, current.details);
+      const assessment = await assessStoredProduct(env.DB, { ownerId: principal.ownerId, connectionId: link.id, generation: link.generation },
+        group, current.product, { details: current.details, env, allowSend: false });
+      const candidate = candidateFor(group, current.product, assessment);
+      if (candidate.match === 'unsuitable' || candidate.match === 'unresolved') return { groupId: group.id, name: group.name, review: 'MATCH_NOT_CONFIRMED' };
+      if (candidate.match === 'substitution' && !choice.substitutionAccepted) return { groupId: group.id, name: group.name, review: 'SUBSTITUTION_NOT_ACCEPTED' };
+      const expectedPriceCents = unitPriceForPacks(current.product, choice.packCount);
+      if (expectedPriceCents === null) return { groupId: group.id, name: group.name, review: 'PRICE_UNAVAILABLE' };
+      return { choice, expectedPriceCents, assessmentId: assessment.id };
+    } catch (cause) {
+      return { groupId: group.id, name: group.name, reason: 'unverified' as const };
+    }
+  });
+  const reviews = issues.filter((item): item is Extract<RepeatCheck, { review: string }> => 'review' in item);
+  if (reviews.length) return fail(409, reviews[0].review, 'Een bewaard product moet opnieuw worden gecontroleerd voordat het kan worden toegevoegd.');
+  const unavailable = issues.filter((item): item is Extract<RepeatCheck, { reason: string }> => 'reason' in item);
+  if (unavailable.length) {
+    return json({ proposal: null, unavailable });
+  }
+  const choices = issues.map(item => {
+    if ('reason' in item || 'review' in item) throw new Error('unreachable unavailable or review item');
+    return { groupId: item.choice.groupId, productId: item.choice.productId, packCount: item.choice.packCount,
+      substitutionAccepted: item.choice.substitutionAccepted, remember: false,
+      expectedPriceCents: item.expectedPriceCents, ...(item.assessmentId ? { assessmentId: item.assessmentId } : {}) };
+  });
+  const selectionBody = { requestId, recipeId, recipeVersion: recipe.version, servings: snapshot.servings, choices };
+  return prepare(env, principal, selectionBody, deps, { allOrNothing: true, fingerprint });
+}
 export async function handleShopping(request: Request, env: ShoppingEnv, deps: ShoppingDependencies = {}): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  const repeatPath = path.match(/^\/api\/recipes\/([^/]+)\/repeat$/);
+  if (repeatPath) {
+    if (request.method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', 'Gebruik POST.');
+    if (request.headers.get('Origin') !== env.APP_ORIGIN) return fail(403, 'ORIGIN_DENIED', 'Dit verzoek is niet toegestaan.');
+    if (request.headers.get('Content-Type')?.split(';')[0] !== 'application/json') return fail(400, 'INVALID_CONTENT_TYPE', 'Verstuur geldige JSON.');
+    const principal = await requirePrincipal(request, env);
+    if (!principal) return fail(401, 'UNAUTHENTICATED', 'Log opnieuw in.');
+    let recipeId: string;
+    try { recipeId = decodeURIComponent(repeatPath[1]); } catch { return fail(400, 'INVALID_ID', 'Ongeldige receptverwijzing.'); }
+    return repeatSavedRecipe(request, env, principal, recipeId, deps);
+  }
   if (!['/api/shopping/plan', '/api/shopping/proposals'].includes(path)) return null;
   if (request.method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', 'Gebruik POST.');
   if (request.headers.get('Origin') !== env.APP_ORIGIN) return fail(403, 'ORIGIN_DENIED', 'Dit verzoek is niet toegestaan.');

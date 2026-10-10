@@ -13,6 +13,10 @@ it('selects normal shopping and leaves pantry products off without remembering',
 it('preserves deselection and custom counts', () => {
   expect(restoreShoppingChoice(row, { productId: 'new', selected: false, count: 3, changed: false, countChanged: true, remember: false, substitutionAccepted: false })).toMatchObject({ selected: false, count: 3 });
 });
+it('preserves an explicit pantry omission even when fresh matches become available', () => {
+  expect(restoreShoppingChoice(row, { productId: null, selected: false, count: null, changed: false, omitted: true, remember: false, substitutionAccepted: false }))
+    .toMatchObject({ productId: null, selected: false, omitted: true, remember: false });
+});
 it.each(['unresolved', 'unsuitable'] as const)('never restores %s using a saved substitution acceptance', match => {
   const uncertain = { ...row, candidates: row.candidates.map(candidate => ({ ...candidate, match })) };
   expect(restoreShoppingChoice(uncertain, { productId: 'new', selected: true, count: 1, changed: true, remember: true, substitutionAccepted: true })).toMatchObject({ selected: false, productId: null });
